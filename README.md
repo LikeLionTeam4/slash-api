@@ -85,7 +85,10 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 
 ### 코드 규칙
 
-- 시각은 모두 `timestamptz`(UTC)로 저장하고, API 는 ISO 8601 UTC 로 주고받는다.
+- **시각은 전 구간 한국 시각으로 통일한다.** API·WSS·SQS JSON 은 `2026-08-04T10:47:00+09:00` 형식,
+  DB 열은 `timestamptz`, JDBC Session 과 SQL 조회는 `Asia/Seoul` 이다.
+  `Instant` 는 오프셋이 없어 항상 `Z` 로 직렬화되므로 DTO 에 사용하지 않고 `OffsetDateTime` 을 쓴다.
+  (V001 주석에 남은 "UTC 저장" 표현은 이미 공유된 마이그레이션이라 수정하지 않았다)
 - 내부 PK 는 `bigint`, 외부 노출 식별자는 `uuid public_id` 를 사용한다.
 - 상태값은 PostgreSQL Enum 대신 `varchar` + `CHECK` 로 관리한다.
 - `DSLContext` 는 Repository 계층 안에서만 사용하고, 생성된 jOOQ Record 를 서비스 밖으로 내보내지 않는다.
