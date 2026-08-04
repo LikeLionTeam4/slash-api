@@ -3,25 +3,45 @@ package com.likelion.slash.common.error;
 import org.springframework.http.HttpStatus;
 
 /**
- * 오류 코드. 개발문서 3.3.6 의 15개와 3.1.4 의 HTTP 상태 코드를 짝지은 것이다.
+ * 오류 코드. 메시지 프로토콜 정의 4.7 · 6.2 · 7.2 · 8.5 · 8.9
  *
  * <p>기본 메시지는 사용자에게 그대로 노출되므로 원인과 해결 방법을 담는다.
- * Token·API Key·전체 경로 같은 민감값을 넣지 않는다. (문서 OB-02)
+ * Token·API Key·개인키·절대 경로 같은 민감값은 넣지 않는다.
+ *
+ * <p>Agent·LLM 이 보낸 오류 코드도 이 열거형으로 정규화해 {@code tasks.error_code} 에 저장한다.
+ * 그 경우의 HTTP 상태는 사용자가 작업을 조회할 때 참고할 값이다.
  */
 public enum ErrorCode {
 
-    /** 사용자 또는 기기 인증이 필요함 */
+    // ---------------------------------------------------------------------
+    // 인증·권한
+    // ---------------------------------------------------------------------
+
+    /** 사용자·기기·서비스 인증이 필요함 */
     AUTH_REQUIRED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
 
     /** 권한 또는 소유권 부족 */
     FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
 
+    /** 기기 토큰 또는 도전값 서명 검증 실패 */
+    AGENT_AUTH_FAILED(HttpStatus.UNAUTHORIZED, "기기 인증에 실패했습니다."),
+
+    /** 등록 코드가 틀렸거나 만료됨 */
+    PAIRING_CODE_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "등록 코드가 올바르지 않거나 만료되었습니다."),
+
+    // ---------------------------------------------------------------------
+    // 입력·자원
+    // ---------------------------------------------------------------------
+
     /** 입력값 형식·범위 오류 */
     VALIDATION_ERROR(HttpStatus.BAD_REQUEST, "요청 값을 확인해 주세요."),
 
+    /** 작업 입력값의 자료형·길이·허용값 위반 */
+    INVALID_PARAMETERS(HttpStatus.UNPROCESSABLE_ENTITY, "작업에 필요한 입력값이 올바르지 않습니다."),
+
     /**
      * 대상 자원을 찾을 수 없음.
-     * 다른 사용자가 소유한 자원도 식별자 추측을 막기 위해 404 로 응답한다. (문서 3.2.3)
+     * 다른 사용자가 소유한 자원도 식별자 추측을 막기 위해 404 로 응답한다.
      */
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "대상을 찾을 수 없습니다."),
 
@@ -32,29 +52,57 @@ public enum ErrorCode {
     /** 같은 멱등키에 다른 요청 본문 사용 */
     IDEMPOTENCY_CONFLICT(HttpStatus.CONFLICT, "같은 요청 키로 다른 내용이 전송되었습니다."),
 
+    // ---------------------------------------------------------------------
+    // 기기·작업 유형
+    // ---------------------------------------------------------------------
+
     /** 선택 PC 가 READY 가 아님 */
     DEVICE_NOT_READY(HttpStatus.UNPROCESSABLE_ENTITY, "선택한 PC가 작업을 받을 수 없습니다."),
 
-    /** 선택 PC 가 다른 작업 실행 중 */
-    DEVICE_BUSY(HttpStatus.UNPROCESSABLE_ENTITY, "선택한 PC가 다른 작업을 실행 중입니다."),
+    /** 선택 PC 가 다른 작업 실행 중 (P0 는 기기당 동시 1건) */
+    DEVICE_BUSY(HttpStatus.CONFLICT, "선택한 PC가 다른 작업을 실행 중입니다."),
 
-    /** 등록 코드가 틀렸거나 만료됨 */
-    PAIRING_CODE_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "등록 코드가 올바르지 않거나 만료되었습니다."),
+    /** 설치된 Agent 가 해당 작업 유형을 지원하지 않음 */
+    TASK_TYPE_NOT_SUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "이 PC에서 지원하지 않는 기능입니다."),
 
-    /** 기기 Token 또는 도전값 서명 검증 실패 */
-    AGENT_AUTH_FAILED(HttpStatus.UNAUTHORIZED, "기기 인증에 실패했습니다."),
+    /** 작업 실행 기한 만료 */
+    TASK_EXPIRED(HttpStatus.UNPROCESSABLE_ENTITY, "작업 실행 기한이 지났습니다."),
 
-    /** GPU Worker 가 시험 준비 상태가 아님 */
-    MODEL_NOT_READY(HttpStatus.SERVICE_UNAVAILABLE, "AI 모델이 아직 준비되지 않았습니다."),
+    // ---------------------------------------------------------------------
+    // Agent 가 보고하는 실행 실패 (RESULT.error.code / ACK.reasonCode)
+    // ---------------------------------------------------------------------
 
-    /** NLU 시간 제한·연결 실패·응답 계약 위반으로 분석할 수 없음 */
+    /** 검색 폴더가 없거나 사용할 수 없음 */
+    SEARCH_FOLDER_NOT_FOUND(HttpStatus.UNPROCESSABLE_ENTITY, "선택한 검색 폴더를 사용할 수 없습니다."),
+
+    /** 프로젝트 작업 폴더가 없거나 사용할 수 없음 (P1) */
+    WORKSPACE_NOT_FOUND(HttpStatus.UNPROCESSABLE_ENTITY, "선택한 프로젝트 폴더를 사용할 수 없습니다."),
+
+    /** Claude·Codex 연동 설정이 없음 (P1) */
+    CODE_AGENT_NOT_CONFIGURED(HttpStatus.UNPROCESSABLE_ENTITY, "이 PC에 AI 도구 연동이 설정되어 있지 않습니다."),
+
+    /** 경로·권한·보안 정책 위반 */
+    POLICY_DENIED(HttpStatus.FORBIDDEN, "허용되지 않은 경로 또는 작업입니다."),
+
+    // ---------------------------------------------------------------------
+    // 외부·내부 서비스
+    // ---------------------------------------------------------------------
+
+    /** NLU 연결 실패·통신 안전 Timeout·응답 계약 위반 */
     NLU_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "요청을 분석하지 못했습니다. 잠시 후 다시 시도해 주세요."),
+
+    /** GPU Worker 가 작업을 받을 준비가 되지 않음 */
+    LLM_NOT_READY(HttpStatus.SERVICE_UNAVAILABLE, "AI 모델이 아직 준비되지 않았습니다."),
 
     /** 날씨 API 등 외부 서비스 이용 불가 */
     UPSTREAM_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "외부 서비스를 이용할 수 없습니다."),
 
-    /** 작업 실행 기한 만료 */
-    TASK_EXPIRED(HttpStatus.UNPROCESSABLE_ENTITY, "작업 실행 기한이 지났습니다."),
+    // ---------------------------------------------------------------------
+    // 프로토콜
+    // ---------------------------------------------------------------------
+
+    /** 지원하지 않는 메시지 contract 버전 (WSS PROTOCOL_ERROR) */
+    UNSUPPORTED_SCHEMA_VERSION(HttpStatus.UNPROCESSABLE_ENTITY, "지원하지 않는 메시지 버전입니다."),
 
     /** 분류되지 않은 내부 오류 */
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "처리 중 문제가 발생했습니다.");
