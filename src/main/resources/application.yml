@@ -1,0 +1,77 @@
+# ---------------------------------------------------------------------------
+# 공통 설정. 환경별 값은 application-{profile}.yml 에서 재정의한다.
+#   local : 로컬 Docker (기본값)
+#   dev   : Dev EKS + Dev RDS
+#   demo  : 시연 환경
+# ---------------------------------------------------------------------------
+spring:
+  application:
+    name: slash-api
+
+  profiles:
+    default: local
+
+  datasource:
+    hikari:
+      # Pod 별 커넥션 상한을 명시한다.
+      # HPA 최대 replica x maximum-pool-size 가 RDS max_connections 의 70% 를 넘지 않도록 관리한다.
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # 전체 삭제를 원천 차단한다. 어떤 프로필에서도 활성화하지 않는다.
+    clean-disabled: true
+
+  jooq:
+    sql-dialect: postgres
+
+  jackson:
+    time-zone: UTC
+    serialization:
+      # 시각을 epoch 숫자가 아니라 ISO 8601 UTC 문자열로 내보낸다.
+      # 예: 2026-07-31T15:00:00Z  (문서 3.1.5)
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# ---------------------------------------------------------------------------
+# 애플리케이션 고유 설정
+# ---------------------------------------------------------------------------
+slash:
+  nlu:
+    # Helm 배포에서는 같은 Namespace 의 짧은 주소를 주입한다. (문서 3.1.1)
+    # Namespace 를 코드에 고정하지 않는다.
+    base-url: ${NLU_BASE_URL:http://localhost:8000}
+    # 연결·응답 합계 2초. 자동 재시도 없음. (문서 3.7.1)
+    timeout: 2s
+
+  device:
+    # Heartbeat 30초, 3회 누락 시 OFFLINE (문서 DV-02, NFR-07)
+    heartbeat-interval: 30s
+    offline-threshold: 90s
+    # 기기 Token 유효기간 (문서 3.5.2)
+    token-ttl: 24h
+
+  pairing:
+    # 등록 코드 5분·1회용 (문서 DV-01)
+    code-ttl: 5m
+
+  websocket:
+    # 사용자 WSS Ticket 30초·1회용 (문서 3.4.2)
+    ticket-ttl: 30s

@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# Dev 환경 (Dev EKS + Dev RDS)
+#   DB 자격증명과 Cognito 설정은 Secrets Manager 에서 환경 변수로 주입한다.
+#   저장소에 평문으로 두지 않는다. (문서 0.8, OB-02)
+# ---------------------------------------------------------------------------
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+
+  data:
+    redis:
+      host: ${VALKEY_HOST}
+      port: ${VALKEY_PORT:6379}
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Cognito User Pool 발급자 주소
+          # 예: https://cognito-idp.ap-northeast-2.amazonaws.com/{userPoolId}
+          issuer-uri: ${COGNITO_ISSUER_URI}
+
+logging:
+  level:
+    com.likelion.slash: INFO

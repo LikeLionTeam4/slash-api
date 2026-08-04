@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# 로컬 개발 환경
+#   docker compose up -d 로 PostgreSQL·Valkey 를 먼저 띄운다.
+#   RDS 에 직접 접속하지 않는다.
+# ---------------------------------------------------------------------------
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/slash
+    username: slash
+    password: slash
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+logging:
+  level:
+    com.likelion.slash: DEBUG
+    # 실행되는 SQL 을 확인한다.
+    org.jooq.tools.LoggerListener: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"

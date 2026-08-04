@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.iws
+.vscode/
+out/
+
+# OS
+.DS_Store
+
+# 로컬 설정 (DB 접속 정보 등)
+gradle.properties
+.env
+*.pem
+
+# 로그
+*.log
