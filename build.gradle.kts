@@ -86,12 +86,40 @@ val dbUrl = providers.gradleProperty("db.url").orElse("jdbc:postgresql://localho
 val dbUser = providers.gradleProperty("db.user").orElse("slash").get()
 val dbPassword = providers.gradleProperty("db.password").orElse("slash").get()
 
+/**
+ * 로컬 DB 를 가리키는 접속 주소인지 판별한다.
+ *
+ * db.url 을 덮어쓰면 원격 DB 를 대상으로 flywayClean 을 실행할 수 있으므로,
+ * 로컬이 아닌 주소에서는 파괴적인 작업을 막는다.
+ */
+val isLocalDatabase = Regex("^jdbc:postgresql://(localhost|127\\.0\\.0\\.1|\\[::1])[:/]")
+    .containsMatchIn(dbUrl)
+
 flyway {
     url = dbUrl
     user = dbUser
     password = dbPassword
     locations = arrayOf("filesystem:src/main/resources/db/migration")
-    cleanDisabled = false // 로컬 전용. 운영/Dev RDS 에서는 절대 활성화하지 않는다.
+    // 로컬 Docker 에서만 clean 을 허용한다. 원격 주소에서는 항상 차단한다.
+    cleanDisabled = !isLocalDatabase
+}
+
+// db.url 을 원격으로 덮어쓴 채 파괴적인 작업을 실행하는 것을 막는다.
+// 시연 DB(slash_demo) 를 실수로 비우는 사고를 방지하기 위한 안전장치다.
+listOf("flywayClean", "flywayUndo").forEach { taskName ->
+    tasks.matching { it.name == taskName }.configureEach {
+        doFirst {
+            if (!isLocalDatabase) {
+                throw GradleException(
+                    """
+                    로컬이 아닌 데이터베이스에는 $taskName 을 실행할 수 없습니다.
+                      대상: $dbUrl
+                    이 작업은 로컬 Docker(localhost) 에서만 허용됩니다.
+                    """.trimIndent()
+                )
+            }
+        }
+    }
 }
 
 jooq {
