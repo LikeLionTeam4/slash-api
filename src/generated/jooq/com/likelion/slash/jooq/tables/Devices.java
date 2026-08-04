@@ -97,6 +97,11 @@ public class Devices extends TableImpl<DevicesRecord> {
     public final TableField<DevicesRecord, String> OS = createField(DSL.name("os"), SQLDataType.VARCHAR(20).nullable(false), this, "");
 
     /**
+     * The column <code>public.devices.architecture</code>.
+     */
+    public final TableField<DevicesRecord, String> ARCHITECTURE = createField(DSL.name("architecture"), SQLDataType.VARCHAR(20).nullable(false), this, "");
+
+    /**
      * The column <code>public.devices.os_version</code>.
      */
     public final TableField<DevicesRecord, String> OS_VERSION = createField(DSL.name("os_version"), SQLDataType.VARCHAR(50), this, "");
@@ -270,6 +275,7 @@ public class Devices extends TableImpl<DevicesRecord> {
     @Override
     public List<Check<DevicesRecord>> getChecks() {
         return Arrays.asList(
+            Internal.createCheck(this, DSL.name("ck_devices_architecture"), "(((architecture)::text = ANY ((ARRAY['X86_64'::character varying, 'ARM64'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_devices_os"), "(((os)::text = ANY ((ARRAY['WINDOWS'::character varying, 'MACOS'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_devices_revoked_at"), "((((status)::text = 'REVOKED'::text) = (revoked_at IS NOT NULL)))", true),
             Internal.createCheck(this, DSL.name("ck_devices_status"), "(((status)::text = ANY ((ARRAY['ONLINE'::character varying, 'READY'::character varying, 'BUSY'::character varying, 'OFFLINE'::character varying, 'REVOKED'::character varying])::text[])))", true)

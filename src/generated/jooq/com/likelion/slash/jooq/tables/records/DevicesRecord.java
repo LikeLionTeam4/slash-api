@@ -114,10 +114,25 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
     }
 
     /**
+     * Setter for <code>public.devices.architecture</code>.
+     */
+    public DevicesRecord setArchitecture(String value) {
+        set(6, value);
+        return this;
+    }
+
+    /**
+     * Getter for <code>public.devices.architecture</code>.
+     */
+    public String getArchitecture() {
+        return (String) get(6);
+    }
+
+    /**
      * Setter for <code>public.devices.os_version</code>.
      */
     public DevicesRecord setOsVersion(String value) {
-        set(6, value);
+        set(7, value);
         return this;
     }
 
@@ -125,14 +140,14 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
      * Getter for <code>public.devices.os_version</code>.
      */
     public String getOsVersion() {
-        return (String) get(6);
+        return (String) get(7);
     }
 
     /**
      * Setter for <code>public.devices.agent_version</code>.
      */
     public DevicesRecord setAgentVersion(String value) {
-        set(7, value);
+        set(8, value);
         return this;
     }
 
@@ -140,14 +155,14 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
      * Getter for <code>public.devices.agent_version</code>.
      */
     public String getAgentVersion() {
-        return (String) get(7);
+        return (String) get(8);
     }
 
     /**
      * Setter for <code>public.devices.status</code>.
      */
     public DevicesRecord setStatus(String value) {
-        set(8, value);
+        set(9, value);
         return this;
     }
 
@@ -155,14 +170,14 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
      * Getter for <code>public.devices.status</code>.
      */
     public String getStatus() {
-        return (String) get(8);
+        return (String) get(9);
     }
 
     /**
      * Setter for <code>public.devices.last_seen_at</code>.
      */
     public DevicesRecord setLastSeenAt(OffsetDateTime value) {
-        set(9, value);
+        set(10, value);
         return this;
     }
 
@@ -170,14 +185,14 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
      * Getter for <code>public.devices.last_seen_at</code>.
      */
     public OffsetDateTime getLastSeenAt() {
-        return (OffsetDateTime) get(9);
+        return (OffsetDateTime) get(10);
     }
 
     /**
      * Setter for <code>public.devices.revoked_at</code>.
      */
     public DevicesRecord setRevokedAt(OffsetDateTime value) {
-        set(10, value);
+        set(11, value);
         return this;
     }
 
@@ -185,7 +200,7 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
      * Getter for <code>public.devices.revoked_at</code>.
      */
     public OffsetDateTime getRevokedAt() {
-        return (OffsetDateTime) get(10);
+        return (OffsetDateTime) get(11);
     }
 
     /**
@@ -193,7 +208,7 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
      * 노출한다.
      */
     public DevicesRecord setVersion(Integer value) {
-        set(11, value);
+        set(12, value);
         return this;
     }
 
@@ -202,14 +217,14 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
      * 노출한다.
      */
     public Integer getVersion() {
-        return (Integer) get(11);
+        return (Integer) get(12);
     }
 
     /**
      * Setter for <code>public.devices.created_at</code>.
      */
     public DevicesRecord setCreatedAt(OffsetDateTime value) {
-        set(12, value);
+        set(13, value);
         return this;
     }
 
@@ -217,14 +232,14 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
      * Getter for <code>public.devices.created_at</code>.
      */
     public OffsetDateTime getCreatedAt() {
-        return (OffsetDateTime) get(12);
+        return (OffsetDateTime) get(13);
     }
 
     /**
      * Setter for <code>public.devices.updated_at</code>.
      */
     public DevicesRecord setUpdatedAt(OffsetDateTime value) {
-        set(13, value);
+        set(14, value);
         return this;
     }
 
@@ -232,7 +247,7 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
      * Getter for <code>public.devices.updated_at</code>.
      */
     public OffsetDateTime getUpdatedAt() {
-        return (OffsetDateTime) get(13);
+        return (OffsetDateTime) get(14);
     }
 
     // -------------------------------------------------------------------------
@@ -258,7 +273,7 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
     /**
      * Create a detached, initialised DevicesRecord
      */
-    public DevicesRecord(Long id, UUID publicId, Long userId, String name, String publicKey, String os, String osVersion, String agentVersion, String status, OffsetDateTime lastSeenAt, OffsetDateTime revokedAt, Integer version, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+    public DevicesRecord(Long id, UUID publicId, Long userId, String name, String publicKey, String os, String architecture, String osVersion, String agentVersion, String status, OffsetDateTime lastSeenAt, OffsetDateTime revokedAt, Integer version, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
         super(Devices.DEVICES);
 
         setId(id);
@@ -267,6 +282,7 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
         setName(name);
         setPublicKey(publicKey);
         setOs(os);
+        setArchitecture(architecture);
         setOsVersion(osVersion);
         setAgentVersion(agentVersion);
         setStatus(status);

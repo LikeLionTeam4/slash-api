@@ -39,7 +39,7 @@ import org.jooq.impl.TableImpl;
 
 
 /**
- * Agent 가 보고한 지원 기능. PK 가 (device_id, capability_code) 라 최신 보고로 덮어쓴다.
+ * Agent 가 READY 프레임의 supportedTaskTypes 로 보고한 지원 작업 유형.
  */
 @SuppressWarnings({ "all", "unchecked", "rawtypes", "this-escape" })
 public class DeviceCapabilities extends TableImpl<DeviceCapabilitiesRecord> {
@@ -65,9 +65,10 @@ public class DeviceCapabilities extends TableImpl<DeviceCapabilitiesRecord> {
     public final TableField<DeviceCapabilitiesRecord, Long> DEVICE_ID = createField(DSL.name("device_id"), SQLDataType.BIGINT.nullable(false), this, "");
 
     /**
-     * The column <code>public.device_capabilities.capability_code</code>.
+     * The column <code>public.device_capabilities.task_type</code>. TaskType 값.
+     * PK 가 (device_id, task_type) 이라 최신 보고로 덮어쓴다.
      */
-    public final TableField<DeviceCapabilitiesRecord, String> CAPABILITY_CODE = createField(DSL.name("capability_code"), SQLDataType.VARCHAR(30).nullable(false), this, "");
+    public final TableField<DeviceCapabilitiesRecord, String> TASK_TYPE = createField(DSL.name("task_type"), SQLDataType.VARCHAR(30).nullable(false), this, "TaskType 값. PK 가 (device_id, task_type) 이라 최신 보고로 덮어쓴다.");
 
     /**
      * The column <code>public.device_capabilities.available</code>.
@@ -84,7 +85,7 @@ public class DeviceCapabilities extends TableImpl<DeviceCapabilitiesRecord> {
     }
 
     private DeviceCapabilities(Name alias, Table<DeviceCapabilitiesRecord> aliased, Field<?>[] parameters, Condition where) {
-        super(alias, null, aliased, parameters, DSL.comment("Agent 가 보고한 지원 기능. PK 가 (device_id, capability_code) 라 최신 보고로 덮어쓴다."), TableOptions.table(), where);
+        super(alias, null, aliased, parameters, DSL.comment("Agent 가 READY 프레임의 supportedTaskTypes 로 보고한 지원 작업 유형."), TableOptions.table(), where);
     }
 
     /**
@@ -171,7 +172,7 @@ public class DeviceCapabilities extends TableImpl<DeviceCapabilitiesRecord> {
     @Override
     public List<Check<DeviceCapabilitiesRecord>> getChecks() {
         return Arrays.asList(
-            Internal.createCheck(this, DSL.name("ck_device_capabilities_code"), "(((capability_code)::text = ANY ((ARRAY['FILE_SEARCH'::character varying, 'SYSTEM_STATUS'::character varying, 'MODEL_ANALYZE'::character varying])::text[])))", true)
+            Internal.createCheck(this, DSL.name("ck_device_capabilities_task_type"), "(((task_type)::text = ANY ((ARRAY['FILE_SEARCH'::character varying, 'SYSTEM_STATUS'::character varying, 'CODE_ANALYSIS'::character varying, 'AI_AGENT_USAGE'::character varying])::text[])))", true)
         );
     }
 

@@ -20,6 +20,8 @@ CREATE TABLE devices (
     -- Ed25519 공개키(Base64). 개인키는 사용자 PC 밖으로 나오지 않는다. (문서 LA-01)
     public_key     text         NOT NULL,
     os             varchar(20)  NOT NULL,
+    -- 실행 패키지와 플랫폼 호환성 판정에 사용한다. Agent 등록 시 필수로 보고한다.
+    architecture   varchar(20)  NOT NULL,
     os_version     varchar(50),
     agent_version  varchar(50),
     status         varchar(20)  NOT NULL DEFAULT 'OFFLINE',
@@ -40,6 +42,9 @@ CREATE TABLE devices (
 
     CONSTRAINT ck_devices_os
         CHECK (os IN ('WINDOWS', 'MACOS')),
+
+    CONSTRAINT ck_devices_architecture
+        CHECK (architecture IN ('X86_64', 'ARM64')),
 
     CONSTRAINT ck_devices_status
         CHECK (status IN ('ONLINE', 'READY', 'BUSY', 'OFFLINE', 'REVOKED')),
@@ -67,23 +72,25 @@ COMMENT ON COLUMN devices.version    IS '낙관적 잠금 값. API 의 ETag 로 
 --   명령 전송 전 "이 PC 가 이 작업을 할 수 있는가" 판정에 사용한다. (문서 DV-05)
 -- ---------------------------------------------------------------------------
 CREATE TABLE device_capabilities (
-    device_id       bigint      NOT NULL,
-    capability_code varchar(30) NOT NULL,
-    available       boolean     NOT NULL DEFAULT true,
-    reported_at     timestamptz NOT NULL DEFAULT now(),
+    device_id   bigint      NOT NULL,
+    task_type   varchar(30) NOT NULL,
+    available   boolean     NOT NULL DEFAULT true,
+    reported_at timestamptz NOT NULL DEFAULT now(),
 
-    CONSTRAINT pk_device_capabilities PRIMARY KEY (device_id, capability_code),
+    CONSTRAINT pk_device_capabilities PRIMARY KEY (device_id, task_type),
 
     CONSTRAINT fk_device_capabilities_device
         FOREIGN KEY (device_id) REFERENCES devices (id) ON DELETE CASCADE,
 
-    -- Agent 가 실제로 실행할 수 있는 기능만 허용한다.
-    -- 새 Tool 을 Agent 에 추가하면 이 목록도 함께 늘려야 한다.
-    CONSTRAINT ck_device_capabilities_code
-        CHECK (capability_code IN ('FILE_SEARCH', 'SYSTEM_STATUS', 'MODEL_ANALYZE'))
+    -- Agent 가 실제로 실행할 수 있는 작업 유형만 허용한다.
+    -- 처리 경로가 LOCAL_AGENT 인 TaskType 과 일치한다.
+    -- 새 작업 유형을 Agent 에 추가하면 이 목록도 함께 늘려야 한다.
+    CONSTRAINT ck_device_capabilities_task_type
+        CHECK (task_type IN ('FILE_SEARCH', 'SYSTEM_STATUS', 'CODE_ANALYSIS', 'AI_AGENT_USAGE'))
 );
 
-COMMENT ON TABLE device_capabilities IS 'Agent 가 보고한 지원 기능. PK 가 (device_id, capability_code) 라 최신 보고로 덮어쓴다.';
+COMMENT ON TABLE  device_capabilities           IS 'Agent 가 READY 프레임의 supportedTaskTypes 로 보고한 지원 작업 유형.';
+COMMENT ON COLUMN device_capabilities.task_type IS 'TaskType 값. PK 가 (device_id, task_type) 이라 최신 보고로 덮어쓴다.';
 
 -- ---------------------------------------------------------------------------
 -- device_pairing_requests

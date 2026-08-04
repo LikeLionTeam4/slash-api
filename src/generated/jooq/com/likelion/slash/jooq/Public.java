@@ -31,7 +31,7 @@ public class Public extends SchemaImpl {
     public static final Public PUBLIC = new Public();
 
     /**
-     * Agent 가 보고한 지원 기능. PK 가 (device_id, capability_code) 라 최신 보고로 덮어쓴다.
+     * Agent 가 READY 프레임의 supportedTaskTypes 로 보고한 지원 작업 유형.
      */
     public final DeviceCapabilities DEVICE_CAPABILITIES = DeviceCapabilities.DEVICE_CAPABILITIES;
 

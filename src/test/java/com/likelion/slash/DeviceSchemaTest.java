@@ -48,6 +48,7 @@ class DeviceSchemaTest {
                 .set(DEVICES.NAME, name)
                 .set(DEVICES.PUBLIC_KEY, "key-" + UUID.randomUUID())
                 .set(DEVICES.OS, "MACOS")
+                .set(DEVICES.ARCHITECTURE, "ARM64")
                 .returning(DEVICES.ID)
                 .fetchOne()
                 .getId();
@@ -63,6 +64,7 @@ class DeviceSchemaTest {
                 .set(DEVICES.NAME, "개발용 MacBook")
                 .set(DEVICES.PUBLIC_KEY, "base64-key-" + UUID.randomUUID())
                 .set(DEVICES.OS, "MACOS")
+                .set(DEVICES.ARCHITECTURE, "ARM64")
                 .returning()
                 .fetchOne();
 
@@ -84,6 +86,7 @@ class DeviceSchemaTest {
                 .set(DEVICES.NAME, "첫 번째 PC")
                 .set(DEVICES.PUBLIC_KEY, sharedKey)
                 .set(DEVICES.OS, "WINDOWS")
+                .set(DEVICES.ARCHITECTURE, "X86_64")
                 .execute();
 
         assertThatThrownBy(() -> dsl.insertInto(DEVICES)
@@ -91,6 +94,7 @@ class DeviceSchemaTest {
                 .set(DEVICES.NAME, "위장 PC")
                 .set(DEVICES.PUBLIC_KEY, sharedKey)
                 .set(DEVICES.OS, "WINDOWS")
+                .set(DEVICES.ARCHITECTURE, "X86_64")
                 .execute())
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -105,6 +109,50 @@ class DeviceSchemaTest {
                 .set(DEVICES.NAME, "리눅스 PC")
                 .set(DEVICES.PUBLIC_KEY, "key-" + UUID.randomUUID())
                 .set(DEVICES.OS, "LINUX")
+                .set(DEVICES.ARCHITECTURE, "X86_64")
+                .execute())
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("정의되지 않은 아키텍처는 저장할 수 없다")
+    void 허용되지_않은_아키텍처는_거부된다() {
+        long userId = 사용자를_만든다();
+
+        assertThatThrownBy(() -> dsl.insertInto(DEVICES)
+                .set(DEVICES.USER_ID, userId)
+                .set(DEVICES.NAME, "미지원 아키텍처 PC")
+                .set(DEVICES.PUBLIC_KEY, "key-" + UUID.randomUUID())
+                .set(DEVICES.OS, "WINDOWS")
+                .set(DEVICES.ARCHITECTURE, "RISCV")
+                .execute())
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("아키텍처 없이 기기를 등록할 수 없다")
+    void 아키텍처는_필수다() {
+        long userId = 사용자를_만든다();
+
+        assertThatThrownBy(() -> dsl.insertInto(DEVICES)
+                .set(DEVICES.USER_ID, userId)
+                .set(DEVICES.NAME, "아키텍처 누락 PC")
+                .set(DEVICES.PUBLIC_KEY, "key-" + UUID.randomUUID())
+                .set(DEVICES.OS, "WINDOWS")
+                .execute())
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("LOCAL_AGENT 경로가 아닌 작업 유형은 지원 기능으로 보고할 수 없다")
+    void 로컬_실행_대상이_아닌_작업_유형은_거부된다() {
+        long userId = 사용자를_만든다();
+        long deviceId = 기기를_만든다(userId, "기능 검증 PC");
+
+        // WEATHER_LOOKUP·TEXT_SUMMARY 는 서버·LLM 이 처리하므로 Agent 기능이 아니다.
+        assertThatThrownBy(() -> dsl.insertInto(DEVICE_CAPABILITIES)
+                .set(DEVICE_CAPABILITIES.DEVICE_ID, deviceId)
+                .set(DEVICE_CAPABILITIES.TASK_TYPE, "WEATHER_LOOKUP")
                 .execute())
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
@@ -148,12 +196,12 @@ class DeviceSchemaTest {
 
         dsl.insertInto(DEVICE_CAPABILITIES)
                 .set(DEVICE_CAPABILITIES.DEVICE_ID, deviceId)
-                .set(DEVICE_CAPABILITIES.CAPABILITY_CODE, "FILE_SEARCH")
+                .set(DEVICE_CAPABILITIES.TASK_TYPE, "FILE_SEARCH")
                 .execute();
 
         assertThatThrownBy(() -> dsl.insertInto(DEVICE_CAPABILITIES)
                 .set(DEVICE_CAPABILITIES.DEVICE_ID, deviceId)
-                .set(DEVICE_CAPABILITIES.CAPABILITY_CODE, "FILE_SEARCH")
+                .set(DEVICE_CAPABILITIES.TASK_TYPE, "FILE_SEARCH")
                 .execute())
                 .isInstanceOf(DataIntegrityViolationException.class);
     }

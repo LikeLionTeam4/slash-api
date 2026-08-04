@@ -31,7 +31,7 @@ public class Keys {
     // UNIQUE and PRIMARY KEY definitions
     // -------------------------------------------------------------------------
 
-    public static final UniqueKey<DeviceCapabilitiesRecord> PK_DEVICE_CAPABILITIES = Internal.createUniqueKey(DeviceCapabilities.DEVICE_CAPABILITIES, DSL.name("pk_device_capabilities"), new TableField[] { DeviceCapabilities.DEVICE_CAPABILITIES.DEVICE_ID, DeviceCapabilities.DEVICE_CAPABILITIES.CAPABILITY_CODE }, true);
+    public static final UniqueKey<DeviceCapabilitiesRecord> PK_DEVICE_CAPABILITIES = Internal.createUniqueKey(DeviceCapabilities.DEVICE_CAPABILITIES, DSL.name("pk_device_capabilities"), new TableField[] { DeviceCapabilities.DEVICE_CAPABILITIES.DEVICE_ID, DeviceCapabilities.DEVICE_CAPABILITIES.TASK_TYPE }, true);
     public static final UniqueKey<DevicePairingRequestsRecord> DEVICE_PAIRING_REQUESTS_PKEY = Internal.createUniqueKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("device_pairing_requests_pkey"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.ID }, true);
     public static final UniqueKey<DevicePairingRequestsRecord> UK_PAIRING_PUBLIC_ID = Internal.createUniqueKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("uk_pairing_public_id"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.PUBLIC_ID }, true);
     public static final UniqueKey<DevicesRecord> DEVICES_PKEY = Internal.createUniqueKey(Devices.DEVICES, DSL.name("devices_pkey"), new TableField[] { Devices.DEVICES.ID }, true);

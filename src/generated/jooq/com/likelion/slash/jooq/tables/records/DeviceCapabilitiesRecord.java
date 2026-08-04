@@ -13,7 +13,7 @@ import org.jooq.impl.UpdatableRecordImpl;
 
 
 /**
- * Agent 가 보고한 지원 기능. PK 가 (device_id, capability_code) 라 최신 보고로 덮어쓴다.
+ * Agent 가 READY 프레임의 supportedTaskTypes 로 보고한 지원 작업 유형.
  */
 @SuppressWarnings({ "all", "unchecked", "rawtypes", "this-escape" })
 public class DeviceCapabilitiesRecord extends UpdatableRecordImpl<DeviceCapabilitiesRecord> {
@@ -36,17 +36,19 @@ public class DeviceCapabilitiesRecord extends UpdatableRecordImpl<DeviceCapabili
     }
 
     /**
-     * Setter for <code>public.device_capabilities.capability_code</code>.
+     * Setter for <code>public.device_capabilities.task_type</code>. TaskType 값.
+     * PK 가 (device_id, task_type) 이라 최신 보고로 덮어쓴다.
      */
-    public DeviceCapabilitiesRecord setCapabilityCode(String value) {
+    public DeviceCapabilitiesRecord setTaskType(String value) {
         set(1, value);
         return this;
     }
 
     /**
-     * Getter for <code>public.device_capabilities.capability_code</code>.
+     * Getter for <code>public.device_capabilities.task_type</code>. TaskType 값.
+     * PK 가 (device_id, task_type) 이라 최신 보고로 덮어쓴다.
      */
-    public String getCapabilityCode() {
+    public String getTaskType() {
         return (String) get(1);
     }
 
@@ -103,11 +105,11 @@ public class DeviceCapabilitiesRecord extends UpdatableRecordImpl<DeviceCapabili
     /**
      * Create a detached, initialised DeviceCapabilitiesRecord
      */
-    public DeviceCapabilitiesRecord(Long deviceId, String capabilityCode, Boolean available, OffsetDateTime reportedAt) {
+    public DeviceCapabilitiesRecord(Long deviceId, String taskType, Boolean available, OffsetDateTime reportedAt) {
         super(DeviceCapabilities.DEVICE_CAPABILITIES);
 
         setDeviceId(deviceId);
-        setCapabilityCode(capabilityCode);
+        setTaskType(taskType);
         setAvailable(available);
         setReportedAt(reportedAt);
         resetChangedOnNotNull();
