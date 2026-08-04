@@ -4,6 +4,9 @@
 package com.likelion.slash.jooq;
 
 
+import com.likelion.slash.jooq.tables.DeviceCapabilities;
+import com.likelion.slash.jooq.tables.DevicePairingRequests;
+import com.likelion.slash.jooq.tables.Devices;
 import com.likelion.slash.jooq.tables.Users;
 
 import java.util.Arrays;
@@ -28,6 +31,21 @@ public class Public extends SchemaImpl {
     public static final Public PUBLIC = new Public();
 
     /**
+     * Agent 가 보고한 지원 기능. PK 가 (device_id, capability_code) 라 최신 보고로 덮어쓴다.
+     */
+    public final DeviceCapabilities DEVICE_CAPABILITIES = DeviceCapabilities.DEVICE_CAPABILITIES;
+
+    /**
+     * 5분·1회용 PC 등록 코드.
+     */
+    public final DevicePairingRequests DEVICE_PAIRING_REQUESTS = DevicePairingRequests.DEVICE_PAIRING_REQUESTS;
+
+    /**
+     * 등록된 PC. 로컬 에이전트가 설치된 기기.
+     */
+    public final Devices DEVICES = Devices.DEVICES;
+
+    /**
      * 서비스 이용자. Cognito sub 로 식별한다.
      */
     public final Users USERS = Users.USERS;
@@ -48,6 +66,9 @@ public class Public extends SchemaImpl {
     @Override
     public final List<Table<?>> getTables() {
         return Arrays.asList(
+            DeviceCapabilities.DEVICE_CAPABILITIES,
+            DevicePairingRequests.DEVICE_PAIRING_REQUESTS,
+            Devices.DEVICES,
             Users.USERS
         );
     }

@@ -4,9 +4,16 @@
 package com.likelion.slash.jooq;
 
 
+import com.likelion.slash.jooq.tables.DeviceCapabilities;
+import com.likelion.slash.jooq.tables.DevicePairingRequests;
+import com.likelion.slash.jooq.tables.Devices;
 import com.likelion.slash.jooq.tables.Users;
+import com.likelion.slash.jooq.tables.records.DeviceCapabilitiesRecord;
+import com.likelion.slash.jooq.tables.records.DevicePairingRequestsRecord;
+import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import com.likelion.slash.jooq.tables.records.UsersRecord;
 
+import org.jooq.ForeignKey;
 import org.jooq.TableField;
 import org.jooq.UniqueKey;
 import org.jooq.impl.DSL;
@@ -24,7 +31,22 @@ public class Keys {
     // UNIQUE and PRIMARY KEY definitions
     // -------------------------------------------------------------------------
 
+    public static final UniqueKey<DeviceCapabilitiesRecord> PK_DEVICE_CAPABILITIES = Internal.createUniqueKey(DeviceCapabilities.DEVICE_CAPABILITIES, DSL.name("pk_device_capabilities"), new TableField[] { DeviceCapabilities.DEVICE_CAPABILITIES.DEVICE_ID, DeviceCapabilities.DEVICE_CAPABILITIES.CAPABILITY_CODE }, true);
+    public static final UniqueKey<DevicePairingRequestsRecord> DEVICE_PAIRING_REQUESTS_PKEY = Internal.createUniqueKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("device_pairing_requests_pkey"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.ID }, true);
+    public static final UniqueKey<DevicePairingRequestsRecord> UK_PAIRING_PUBLIC_ID = Internal.createUniqueKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("uk_pairing_public_id"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.PUBLIC_ID }, true);
+    public static final UniqueKey<DevicesRecord> DEVICES_PKEY = Internal.createUniqueKey(Devices.DEVICES, DSL.name("devices_pkey"), new TableField[] { Devices.DEVICES.ID }, true);
+    public static final UniqueKey<DevicesRecord> UK_DEVICES_PUBLIC_ID = Internal.createUniqueKey(Devices.DEVICES, DSL.name("uk_devices_public_id"), new TableField[] { Devices.DEVICES.PUBLIC_ID }, true);
+    public static final UniqueKey<DevicesRecord> UK_DEVICES_PUBLIC_KEY = Internal.createUniqueKey(Devices.DEVICES, DSL.name("uk_devices_public_key"), new TableField[] { Devices.DEVICES.PUBLIC_KEY }, true);
     public static final UniqueKey<UsersRecord> UK_USERS_COGNITO_SUB = Internal.createUniqueKey(Users.USERS, DSL.name("uk_users_cognito_sub"), new TableField[] { Users.USERS.COGNITO_SUB }, true);
     public static final UniqueKey<UsersRecord> UK_USERS_PUBLIC_ID = Internal.createUniqueKey(Users.USERS, DSL.name("uk_users_public_id"), new TableField[] { Users.USERS.PUBLIC_ID }, true);
     public static final UniqueKey<UsersRecord> USERS_PKEY = Internal.createUniqueKey(Users.USERS, DSL.name("users_pkey"), new TableField[] { Users.USERS.ID }, true);
+
+    // -------------------------------------------------------------------------
+    // FOREIGN KEY definitions
+    // -------------------------------------------------------------------------
+
+    public static final ForeignKey<DeviceCapabilitiesRecord, DevicesRecord> DEVICE_CAPABILITIES__FK_DEVICE_CAPABILITIES_DEVICE = Internal.createForeignKey(DeviceCapabilities.DEVICE_CAPABILITIES, DSL.name("fk_device_capabilities_device"), new TableField[] { DeviceCapabilities.DEVICE_CAPABILITIES.DEVICE_ID }, Keys.DEVICES_PKEY, new TableField[] { Devices.DEVICES.ID }, true);
+    public static final ForeignKey<DevicePairingRequestsRecord, DevicesRecord> DEVICE_PAIRING_REQUESTS__FK_PAIRING_CONSUMED_DEVICE = Internal.createForeignKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("fk_pairing_consumed_device"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.CONSUMED_DEVICE_ID }, Keys.DEVICES_PKEY, new TableField[] { Devices.DEVICES.ID }, true);
+    public static final ForeignKey<DevicePairingRequestsRecord, UsersRecord> DEVICE_PAIRING_REQUESTS__FK_PAIRING_USER = Internal.createForeignKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("fk_pairing_user"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true);
+    public static final ForeignKey<DevicesRecord, UsersRecord> DEVICES__FK_DEVICES_USER = Internal.createForeignKey(Devices.DEVICES, DSL.name("fk_devices_user"), new TableField[] { Devices.DEVICES.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true);
 }

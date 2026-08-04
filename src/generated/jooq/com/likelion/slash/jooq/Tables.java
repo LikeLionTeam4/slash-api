@@ -4,6 +4,9 @@
 package com.likelion.slash.jooq;
 
 
+import com.likelion.slash.jooq.tables.DeviceCapabilities;
+import com.likelion.slash.jooq.tables.DevicePairingRequests;
+import com.likelion.slash.jooq.tables.Devices;
 import com.likelion.slash.jooq.tables.Users;
 
 
@@ -12,6 +15,21 @@ import com.likelion.slash.jooq.tables.Users;
  */
 @SuppressWarnings({ "all", "unchecked", "rawtypes", "this-escape" })
 public class Tables {
+
+    /**
+     * Agent 가 보고한 지원 기능. PK 가 (device_id, capability_code) 라 최신 보고로 덮어쓴다.
+     */
+    public static final DeviceCapabilities DEVICE_CAPABILITIES = DeviceCapabilities.DEVICE_CAPABILITIES;
+
+    /**
+     * 5분·1회용 PC 등록 코드.
+     */
+    public static final DevicePairingRequests DEVICE_PAIRING_REQUESTS = DevicePairingRequests.DEVICE_PAIRING_REQUESTS;
+
+    /**
+     * 등록된 PC. 로컬 에이전트가 설치된 기기.
+     */
+    public static final Devices DEVICES = Devices.DEVICES;
 
     /**
      * 서비스 이용자. Cognito sub 로 식별한다.

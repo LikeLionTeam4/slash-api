@@ -6,6 +6,8 @@ package com.likelion.slash.jooq.tables;
 
 import com.likelion.slash.jooq.Keys;
 import com.likelion.slash.jooq.Public;
+import com.likelion.slash.jooq.tables.DevicePairingRequests.DevicePairingRequestsPath;
+import com.likelion.slash.jooq.tables.Devices.DevicesPath;
 import com.likelion.slash.jooq.tables.records.UsersRecord;
 
 import java.time.OffsetDateTime;
@@ -17,10 +19,14 @@ import java.util.UUID;
 import org.jooq.Check;
 import org.jooq.Condition;
 import org.jooq.Field;
+import org.jooq.ForeignKey;
 import org.jooq.Identity;
+import org.jooq.InverseForeignKey;
 import org.jooq.Name;
+import org.jooq.Path;
 import org.jooq.PlainSQL;
 import org.jooq.QueryPart;
+import org.jooq.Record;
 import org.jooq.SQL;
 import org.jooq.Schema;
 import org.jooq.Select;
@@ -131,6 +137,39 @@ public class Users extends TableImpl<UsersRecord> {
         this(DSL.name("users"), null);
     }
 
+    public <O extends Record> Users(Table<O> path, ForeignKey<O, UsersRecord> childPath, InverseForeignKey<O, UsersRecord> parentPath) {
+        super(path, childPath, parentPath, USERS);
+    }
+
+    /**
+     * A subtype implementing {@link Path} for simplified path-based joins.
+     */
+    public static class UsersPath extends Users implements Path<UsersRecord> {
+
+        private static final long serialVersionUID = 1L;
+        public <O extends Record> UsersPath(Table<O> path, ForeignKey<O, UsersRecord> childPath, InverseForeignKey<O, UsersRecord> parentPath) {
+            super(path, childPath, parentPath);
+        }
+        private UsersPath(Name alias, Table<UsersRecord> aliased) {
+            super(alias, aliased);
+        }
+
+        @Override
+        public UsersPath as(String alias) {
+            return new UsersPath(DSL.name(alias), this);
+        }
+
+        @Override
+        public UsersPath as(Name alias) {
+            return new UsersPath(alias, this);
+        }
+
+        @Override
+        public UsersPath as(Table<?> alias) {
+            return new UsersPath(alias.getQualifiedName(), this);
+        }
+    }
+
     @Override
     public Schema getSchema() {
         return aliased() ? null : Public.PUBLIC;
@@ -149,6 +188,32 @@ public class Users extends TableImpl<UsersRecord> {
     @Override
     public List<UniqueKey<UsersRecord>> getUniqueKeys() {
         return Arrays.asList(Keys.UK_USERS_COGNITO_SUB, Keys.UK_USERS_PUBLIC_ID);
+    }
+
+    private transient DevicesPath _devices;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.devices</code>
+     * table
+     */
+    public DevicesPath devices() {
+        if (_devices == null)
+            _devices = new DevicesPath(this, null, Keys.DEVICES__FK_DEVICES_USER.getInverseKey());
+
+        return _devices;
+    }
+
+    private transient DevicePairingRequestsPath _devicePairingRequests;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.device_pairing_requests</code> table
+     */
+    public DevicePairingRequestsPath devicePairingRequests() {
+        if (_devicePairingRequests == null)
+            _devicePairingRequests = new DevicePairingRequestsPath(this, null, Keys.DEVICE_PAIRING_REQUESTS__FK_PAIRING_USER.getInverseKey());
+
+        return _devicePairingRequests;
     }
 
     @Override
