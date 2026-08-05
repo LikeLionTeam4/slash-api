@@ -4,8 +4,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import static com.likelion.slash.jooq.Tables.USERS;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.likelion.slash.common.enums.UserStatus;
+import org.jooq.DSLContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +37,16 @@ class MeControllerTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private DSLContext dsl;
+
+    private void 계정_상태를_바꾼다(String cognitoSub, UserStatus status) {
+        dsl.update(USERS)
+                .set(USERS.STATUS, status.name())
+                .where(USERS.COGNITO_SUB.eq(cognitoSub))
+                .execute();
+    }
 
     private JsonNode 로그인해서_내정보_조회(String token) throws Exception {
         String body = mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer " + token))
@@ -100,6 +114,36 @@ class MeControllerTest {
         mockMvc.perform(get("/api/v1/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error.code").value("AUTH_REQUIRED"));
+    }
+
+    @Test
+    @DisplayName("정지된 계정은 토큰이 살아 있어도 403 이다")
+    void 정지된_계정은_거부한다() throws Exception {
+        // 첫 호출로 사용자를 만든다.
+        mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer carol"))
+                .andExpect(status().isOk());
+
+        계정_상태를_바꾼다("carol", UserStatus.SUSPENDED);
+
+        // 토큰 자체는 유효하므로 401 이 아니라 403 이다.
+        // 우리 쪽에서 이용을 막을 수 있어야 하고, 프론트가 토큰 갱신으로 뚫으려 해서도 안 된다.
+        mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer carol"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.meta.requestId").exists());
+    }
+
+    @Test
+    @DisplayName("탈퇴한 계정도 403 이다")
+    void 탈퇴한_계정은_거부한다() throws Exception {
+        mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer dave"))
+                .andExpect(status().isOk());
+
+        계정_상태를_바꾼다("dave", UserStatus.DELETED);
+
+        mockMvc.perform(get("/api/v1/me").header("Authorization", "Bearer dave"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
     }
 
     @Test

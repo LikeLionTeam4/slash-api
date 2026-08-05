@@ -2,6 +2,7 @@ package com.likelion.slash.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.likelion.slash.common.enums.UserStatus;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -74,5 +75,37 @@ class UserRepositoryTest {
     @DisplayName("없는 사용자를 찾으면 비어 있다")
     void 없는_사용자는_비어_있다() {
         assertThat(userRepository.findByCognitoSub("존재하지-않는-sub")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("화면에서 바꾼 표시 이름과 시간대를 반영한다")
+    void 프로필을_수정한다() {
+        var user = userRepository.syncFromToken("sub-" + UUID.randomUUID(), "user@example.com", "이전 이름");
+
+        var updated = userRepository.updateProfile(user.getId(), "새 이름", "Asia/Tokyo");
+
+        assertThat(updated).isPresent();
+        assertThat(updated.get().getDisplayName()).isEqualTo("새 이름");
+        assertThat(updated.get().getTimezone()).isEqualTo("Asia/Tokyo");
+    }
+
+    @Test
+    @DisplayName("없는 사용자의 프로필은 수정되지 않는다")
+    void 없는_사용자는_수정되지_않는다() {
+        assertThat(userRepository.updateProfile(-1L, "새 이름", "Asia/Seoul")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("이용을 정지해도 행은 남는다")
+    void 정지해도_행은_남는다() {
+        var user = userRepository.syncFromToken("sub-" + UUID.randomUUID(), "user@example.com", null);
+
+        assertThat(userRepository.updateStatus(user.getId(), UserStatus.SUSPENDED)).isTrue();
+
+        // 감사 기록과 작업 이력의 FK 를 보존해야 하므로 행을 지우지 않는다.
+        assertThat(userRepository.findById(user.getId()))
+                .get()
+                .extracting(record -> record.getStatus())
+                .isEqualTo(UserStatus.SUSPENDED.name());
     }
 }
