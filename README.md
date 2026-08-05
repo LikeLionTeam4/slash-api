@@ -79,6 +79,9 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 | `DB_USERNAME` / `DB_PASSWORD` | DB 자격증명 |
 | `VALKEY_HOST` / `VALKEY_PORT` | ElastiCache for Valkey |
 | `COGNITO_ISSUER_URI` | Cognito User Pool 발급자 주소 |
+| `COGNITO_CLIENT_ID` | App Client ID. 다른 Client 의 토큰을 거르는 기준 |
+| `COGNITO_USER_INFO_URI` | Hosted UI 의 `/oauth2/userInfo`. 최초 로그인 시 이메일을 받아온다 |
+| `CORS_ALLOWED_ORIGINS` | 웹 클라이언트 오리진 (쉼표 구분) |
 | `NLU_BASE_URL` | slash-nlu 내부 주소 (예: `http://slash-nlu/internal/v1`) |
 
 > 자격증명을 저장소에 평문으로 두지 않는다. Namespace 를 코드에 고정하지 않는다.
@@ -92,6 +95,12 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 - 내부 PK 는 `bigint`, 외부 노출 식별자는 `uuid public_id` 를 사용한다.
 - 상태값은 PostgreSQL Enum 대신 `varchar` + `CHECK` 로 관리한다.
 - `DSLContext` 는 Repository 계층 안에서만 사용하고, 생성된 jOOQ Record 를 서비스 밖으로 내보내지 않는다.
+
+## 문서
+
+| 문서 | 대상 | 내용 |
+|---|---|---|
+| [프론트엔드 연동 규약](docs/frontend-api-contract.md) | slash-web | 공통 헤더, 응답·오류 형식, 오류 코드, Cognito 인증 흐름, WSS Ticket |
 
 ## 관련 저장소
 
