@@ -30,6 +30,31 @@ docker compose up -d
 ./gradlew bootRun
 ```
 
+### 로컬 인증
+
+기본은 **임시 인증**이다. 아무 문자열을 Bearer 로 보내면 그 문자열의 사용자가 된다.
+
+```bash
+curl -H "Authorization: Bearer alice" http://localhost:8080/api/v1/me
+```
+
+실제 Cognito 로 붙으려면 `.env` 에 값을 채운다.
+**채우는 순간 임시 인증은 자동으로 꺼진다.** 설정 파일은 고치지 않는다.
+
+```bash
+cp .env.example .env    # 값을 채운 뒤
+./gradlew bootRun
+```
+
+값은 팀 채널에서 받는다. `.env` 는 저장소에 올리지 않는다.
+
+- `COGNITO_ISSUER_URI` 가 전환 스위치다. 이 값이 비어 있으면 나머지를 채워도 임시 인증을 쓴다.
+- 발급자만 넣고 나머지를 빠뜨리면 기동 시점에 어떤 값이 없는지 알려주고 멈춘다.
+- 시험(`./gradlew test`)은 이 값을 무시한다. 항상 임시 인증으로 돈다.
+
+IDE 에서 실행한다면 `.env` 가 아니라 실행 구성의 환경 변수에 같은 값을 넣는다.
+(`.env` 를 읽는 것은 `bootRun` 이다)
+
 ### 스키마를 변경할 때
 
 1. `src/main/resources/db/migration/` 에 새 마이그레이션을 추가한다.

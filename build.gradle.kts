@@ -75,6 +75,77 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+
+    // 시험은 개발자 셸에 export 된 Cognito 설정을 타면 안 된다.
+    // 값이 남아 있으면 실제 Cognito 검증이 켜지면서 로컬 임시 인증이 꺼지고,
+    // 인증이 필요한 시험이 통째로 401 이 된다. (컨텍스트마다 외부 호출도 나간다)
+    listOf("COGNITO_ISSUER_URI", "COGNITO_CLIENT_ID", "COGNITO_USER_INFO_URI")
+        .forEach { environment(it, "") }
+}
+
+// ---------------------------------------------------------------------------
+// .env 지원
+//
+//   Gradle 도 Spring Boot 도 .env 를 자동으로 읽지 않는다.
+//   팀원마다 셸을 설정하지 않아도 되도록 bootRun 에서만 직접 읽어 넣는다.
+//
+//     cp .env.example .env   # 값을 채운 뒤
+//     ./gradlew bootRun
+//
+//   .env 는 .gitignore 대상이라 저장소에 올라가지 않는다.
+//   시험은 위 Test 설정이 값을 비우므로 .env 가 있어도 영향받지 않는다.
+// ---------------------------------------------------------------------------
+/**
+ * .env 한 줄의 값 부분을 읽는다.
+ *
+ * 따옴표로 감쌌으면 그 안을 그대로 쓰고, 감싸지 않았으면 뒤에 붙은 주석을 잘라낸다.
+ *
+ *   KEY=값 # 설명     -> "값"
+ *   KEY="값 # 설명"   -> "값 # 설명"
+ *
+ * 주석을 잘라내지 않으면 CLIENT_ID 같은 값에 설명이 섞여도 기동은 성공하고
+ * 토큰만 전부 401 이 된다. 원인을 찾기 어려운 실패라 여기서 막는다.
+ */
+fun parseDotenvValue(rawValue: String): String {
+    val raw = rawValue.trim()
+
+    if (raw.length >= 2 && (raw.startsWith("\"") || raw.startsWith("'"))) {
+        val quote = raw[0]
+        val closing = raw.indexOf(quote, startIndex = 1)
+        if (closing > 0) {
+            return raw.substring(1, closing)
+        }
+    }
+
+    return raw.substringBefore(" #").substringBefore("\t#").trim()
+}
+
+fun loadDotenv(): Map<String, String> {
+    val envFile = rootProject.file(".env")
+    if (!envFile.exists()) {
+        return emptyMap()
+    }
+
+    return envFile.readLines()
+        .map(String::trim)
+        // 주석과 빈 줄을 건너뛴다.
+        .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains("=") }
+        .associate { line ->
+            val (key, value) = line.split("=", limit = 2)
+            key.trim() to parseDotenvValue(value)
+        }
+}
+
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+    val dotenv = loadDotenv()
+    dotenv.forEach { (key, value) -> environment(key, value) }
+
+    doFirst {
+        if (dotenv.isNotEmpty()) {
+            // 값은 찍지 않는다. 어떤 키를 읽었는지만 알린다.
+            logger.lifecycle(".env 에서 ${dotenv.keys.sorted().joinToString(", ")} 를 읽었습니다.")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
