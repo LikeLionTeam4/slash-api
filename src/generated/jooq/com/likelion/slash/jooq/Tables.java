@@ -4,9 +4,16 @@
 package com.likelion.slash.jooq;
 
 
+import com.likelion.slash.jooq.tables.AgentDispatches;
+import com.likelion.slash.jooq.tables.AsyncJobs;
+import com.likelion.slash.jooq.tables.AuditEvents;
 import com.likelion.slash.jooq.tables.DeviceCapabilities;
 import com.likelion.slash.jooq.tables.DevicePairingRequests;
 import com.likelion.slash.jooq.tables.Devices;
+import com.likelion.slash.jooq.tables.IdempotencyRecords;
+import com.likelion.slash.jooq.tables.OutboxEvents;
+import com.likelion.slash.jooq.tables.TaskEvents;
+import com.likelion.slash.jooq.tables.Tasks;
 import com.likelion.slash.jooq.tables.Users;
 
 
@@ -15,6 +22,21 @@ import com.likelion.slash.jooq.tables.Users;
  */
 @SuppressWarnings({ "all", "unchecked", "rawtypes", "this-escape" })
 public class Tables {
+
+    /**
+     * Agent 작업 전달 시도. 연결 복구 뒤 미완료 전달을 다시 보내는 근거가 된다.
+     */
+    public static final AgentDispatches AGENT_DISPATCHES = AgentDispatches.AGENT_DISPATCHES;
+
+    /**
+     * SQS 로 전달하는 LLM 작업. Task 당 한 건.
+     */
+    public static final AsyncJobs ASYNC_JOBS = AsyncJobs.ASYNC_JOBS;
+
+    /**
+     * PC 등록 해제·권한 등 주요 변경 기록. 비밀값과 전체 파일 경로를 저장하지 않는다.
+     */
+    public static final AuditEvents AUDIT_EVENTS = AuditEvents.AUDIT_EVENTS;
 
     /**
      * Agent 가 READY 프레임의 supportedTaskTypes 로 보고한 지원 작업 유형.
@@ -30,6 +52,26 @@ public class Tables {
      * 등록된 PC. 로컬 에이전트가 설치된 기기.
      */
     public static final Devices DEVICES = Devices.DEVICES;
+
+    /**
+     * 작업 생성 중복 방지. 보존 기간은 24시간.
+     */
+    public static final IdempotencyRecords IDEMPOTENCY_RECORDS = IdempotencyRecords.IDEMPOTENCY_RECORDS;
+
+    /**
+     * DB 저장과 SQS 발행 사이의 유실 방지. published_at IS NULL 만 전달 대상이다.
+     */
+    public static final OutboxEvents OUTBOX_EVENTS = OutboxEvents.OUTBOX_EVENTS;
+
+    /**
+     * 작업 상태 전이 타임라인. WSS 단절 후 REST 로 복구하는 근거가 된다.
+     */
+    public static final TaskEvents TASK_EVENTS = TaskEvents.TASK_EVENTS;
+
+    /**
+     * 사용자 요청의 최종 원장. 즉시 완료 가능한 요청도 이력 일관성을 위해 생성한다.
+     */
+    public static final Tasks TASKS = Tasks.TASKS;
 
     /**
      * 서비스 이용자. Cognito sub 로 식별한다.

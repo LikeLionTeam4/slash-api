@@ -7,8 +7,10 @@ package com.likelion.slash.jooq.tables;
 import com.likelion.slash.jooq.Indexes;
 import com.likelion.slash.jooq.Keys;
 import com.likelion.slash.jooq.Public;
+import com.likelion.slash.jooq.tables.AgentDispatches.AgentDispatchesPath;
 import com.likelion.slash.jooq.tables.DeviceCapabilities.DeviceCapabilitiesPath;
 import com.likelion.slash.jooq.tables.DevicePairingRequests.DevicePairingRequestsPath;
+import com.likelion.slash.jooq.tables.Tasks.TasksPath;
 import com.likelion.slash.jooq.tables.Users.UsersPath;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
 
@@ -259,6 +261,19 @@ public class Devices extends TableImpl<DevicesRecord> {
         return _deviceCapabilities;
     }
 
+    private transient AgentDispatchesPath _agentDispatches;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.agent_dispatches</code> table
+     */
+    public AgentDispatchesPath agentDispatches() {
+        if (_agentDispatches == null)
+            _agentDispatches = new AgentDispatchesPath(this, null, Keys.AGENT_DISPATCHES__FK_DISPATCH_DEVICE.getInverseKey());
+
+        return _agentDispatches;
+    }
+
     private transient DevicePairingRequestsPath _devicePairingRequests;
 
     /**
@@ -270,6 +285,18 @@ public class Devices extends TableImpl<DevicesRecord> {
             _devicePairingRequests = new DevicePairingRequestsPath(this, null, Keys.DEVICE_PAIRING_REQUESTS__FK_PAIRING_CONSUMED_DEVICE.getInverseKey());
 
         return _devicePairingRequests;
+    }
+
+    private transient TasksPath _tasks;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.tasks</code> table
+     */
+    public TasksPath tasks() {
+        if (_tasks == null)
+            _tasks = new TasksPath(this, null, Keys.TASKS__FK_TASKS_DEVICE.getInverseKey());
+
+        return _tasks;
     }
 
     @Override

@@ -4,13 +4,27 @@
 package com.likelion.slash.jooq;
 
 
+import com.likelion.slash.jooq.tables.AgentDispatches;
+import com.likelion.slash.jooq.tables.AsyncJobs;
+import com.likelion.slash.jooq.tables.AuditEvents;
 import com.likelion.slash.jooq.tables.DeviceCapabilities;
 import com.likelion.slash.jooq.tables.DevicePairingRequests;
 import com.likelion.slash.jooq.tables.Devices;
+import com.likelion.slash.jooq.tables.IdempotencyRecords;
+import com.likelion.slash.jooq.tables.OutboxEvents;
+import com.likelion.slash.jooq.tables.TaskEvents;
+import com.likelion.slash.jooq.tables.Tasks;
 import com.likelion.slash.jooq.tables.Users;
+import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
+import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
+import com.likelion.slash.jooq.tables.records.AuditEventsRecord;
 import com.likelion.slash.jooq.tables.records.DeviceCapabilitiesRecord;
 import com.likelion.slash.jooq.tables.records.DevicePairingRequestsRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
+import com.likelion.slash.jooq.tables.records.IdempotencyRecordsRecord;
+import com.likelion.slash.jooq.tables.records.OutboxEventsRecord;
+import com.likelion.slash.jooq.tables.records.TaskEventsRecord;
+import com.likelion.slash.jooq.tables.records.TasksRecord;
 import com.likelion.slash.jooq.tables.records.UsersRecord;
 
 import org.jooq.ForeignKey;
@@ -31,12 +45,30 @@ public class Keys {
     // UNIQUE and PRIMARY KEY definitions
     // -------------------------------------------------------------------------
 
+    public static final UniqueKey<AgentDispatchesRecord> AGENT_DISPATCHES_PKEY = Internal.createUniqueKey(AgentDispatches.AGENT_DISPATCHES, DSL.name("agent_dispatches_pkey"), new TableField[] { AgentDispatches.AGENT_DISPATCHES.ID }, true);
+    public static final UniqueKey<AgentDispatchesRecord> UK_DISPATCH_PUBLIC_ID = Internal.createUniqueKey(AgentDispatches.AGENT_DISPATCHES, DSL.name("uk_dispatch_public_id"), new TableField[] { AgentDispatches.AGENT_DISPATCHES.PUBLIC_ID }, true);
+    public static final UniqueKey<AsyncJobsRecord> ASYNC_JOBS_PKEY = Internal.createUniqueKey(AsyncJobs.ASYNC_JOBS, DSL.name("async_jobs_pkey"), new TableField[] { AsyncJobs.ASYNC_JOBS.ID }, true);
+    public static final UniqueKey<AsyncJobsRecord> UK_ASYNC_JOBS_PUBLIC_ID = Internal.createUniqueKey(AsyncJobs.ASYNC_JOBS, DSL.name("uk_async_jobs_public_id"), new TableField[] { AsyncJobs.ASYNC_JOBS.PUBLIC_ID }, true);
+    public static final UniqueKey<AsyncJobsRecord> UK_ASYNC_JOBS_RESULT_EVENT = Internal.createUniqueKey(AsyncJobs.ASYNC_JOBS, DSL.name("uk_async_jobs_result_event"), new TableField[] { AsyncJobs.ASYNC_JOBS.RESULT_EVENT_ID }, true);
+    public static final UniqueKey<AsyncJobsRecord> UK_ASYNC_JOBS_TASK = Internal.createUniqueKey(AsyncJobs.ASYNC_JOBS, DSL.name("uk_async_jobs_task"), new TableField[] { AsyncJobs.ASYNC_JOBS.TASK_ID }, true);
+    public static final UniqueKey<AuditEventsRecord> AUDIT_EVENTS_PKEY = Internal.createUniqueKey(AuditEvents.AUDIT_EVENTS, DSL.name("audit_events_pkey"), new TableField[] { AuditEvents.AUDIT_EVENTS.ID }, true);
+    public static final UniqueKey<AuditEventsRecord> UK_AUDIT_EVENTS_PUBLIC_ID = Internal.createUniqueKey(AuditEvents.AUDIT_EVENTS, DSL.name("uk_audit_events_public_id"), new TableField[] { AuditEvents.AUDIT_EVENTS.PUBLIC_ID }, true);
     public static final UniqueKey<DeviceCapabilitiesRecord> PK_DEVICE_CAPABILITIES = Internal.createUniqueKey(DeviceCapabilities.DEVICE_CAPABILITIES, DSL.name("pk_device_capabilities"), new TableField[] { DeviceCapabilities.DEVICE_CAPABILITIES.DEVICE_ID, DeviceCapabilities.DEVICE_CAPABILITIES.TASK_TYPE }, true);
     public static final UniqueKey<DevicePairingRequestsRecord> DEVICE_PAIRING_REQUESTS_PKEY = Internal.createUniqueKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("device_pairing_requests_pkey"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.ID }, true);
     public static final UniqueKey<DevicePairingRequestsRecord> UK_PAIRING_PUBLIC_ID = Internal.createUniqueKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("uk_pairing_public_id"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.PUBLIC_ID }, true);
     public static final UniqueKey<DevicesRecord> DEVICES_PKEY = Internal.createUniqueKey(Devices.DEVICES, DSL.name("devices_pkey"), new TableField[] { Devices.DEVICES.ID }, true);
     public static final UniqueKey<DevicesRecord> UK_DEVICES_PUBLIC_ID = Internal.createUniqueKey(Devices.DEVICES, DSL.name("uk_devices_public_id"), new TableField[] { Devices.DEVICES.PUBLIC_ID }, true);
     public static final UniqueKey<DevicesRecord> UK_DEVICES_PUBLIC_KEY = Internal.createUniqueKey(Devices.DEVICES, DSL.name("uk_devices_public_key"), new TableField[] { Devices.DEVICES.PUBLIC_KEY }, true);
+    public static final UniqueKey<IdempotencyRecordsRecord> IDEMPOTENCY_RECORDS_PKEY = Internal.createUniqueKey(IdempotencyRecords.IDEMPOTENCY_RECORDS, DSL.name("idempotency_records_pkey"), new TableField[] { IdempotencyRecords.IDEMPOTENCY_RECORDS.ID }, true);
+    public static final UniqueKey<IdempotencyRecordsRecord> UK_IDEMPOTENCY_SCOPE = Internal.createUniqueKey(IdempotencyRecords.IDEMPOTENCY_RECORDS, DSL.name("uk_idempotency_scope"), new TableField[] { IdempotencyRecords.IDEMPOTENCY_RECORDS.USER_ID, IdempotencyRecords.IDEMPOTENCY_RECORDS.IDEMPOTENCY_KEY, IdempotencyRecords.IDEMPOTENCY_RECORDS.REQUEST_PATH }, true);
+    public static final UniqueKey<OutboxEventsRecord> OUTBOX_EVENTS_PKEY = Internal.createUniqueKey(OutboxEvents.OUTBOX_EVENTS, DSL.name("outbox_events_pkey"), new TableField[] { OutboxEvents.OUTBOX_EVENTS.ID }, true);
+    public static final UniqueKey<OutboxEventsRecord> UK_OUTBOX_PUBLIC_ID = Internal.createUniqueKey(OutboxEvents.OUTBOX_EVENTS, DSL.name("uk_outbox_public_id"), new TableField[] { OutboxEvents.OUTBOX_EVENTS.PUBLIC_ID }, true);
+    public static final UniqueKey<TaskEventsRecord> TASK_EVENTS_PKEY = Internal.createUniqueKey(TaskEvents.TASK_EVENTS, DSL.name("task_events_pkey"), new TableField[] { TaskEvents.TASK_EVENTS.ID }, true);
+    public static final UniqueKey<TaskEventsRecord> UK_TASK_EVENTS_PUBLIC_ID = Internal.createUniqueKey(TaskEvents.TASK_EVENTS, DSL.name("uk_task_events_public_id"), new TableField[] { TaskEvents.TASK_EVENTS.PUBLIC_ID }, true);
+    public static final UniqueKey<TaskEventsRecord> UK_TASK_EVENTS_SEQUENCE = Internal.createUniqueKey(TaskEvents.TASK_EVENTS, DSL.name("uk_task_events_sequence"), new TableField[] { TaskEvents.TASK_EVENTS.TASK_ID, TaskEvents.TASK_EVENTS.SEQUENCE }, true);
+    public static final UniqueKey<TasksRecord> TASKS_PKEY = Internal.createUniqueKey(Tasks.TASKS, DSL.name("tasks_pkey"), new TableField[] { Tasks.TASKS.ID }, true);
+    public static final UniqueKey<TasksRecord> UK_TASKS_ID_DEVICE = Internal.createUniqueKey(Tasks.TASKS, DSL.name("uk_tasks_id_device"), new TableField[] { Tasks.TASKS.ID, Tasks.TASKS.DEVICE_ID }, true);
+    public static final UniqueKey<TasksRecord> UK_TASKS_PUBLIC_ID = Internal.createUniqueKey(Tasks.TASKS, DSL.name("uk_tasks_public_id"), new TableField[] { Tasks.TASKS.PUBLIC_ID }, true);
     public static final UniqueKey<UsersRecord> UK_USERS_COGNITO_SUB = Internal.createUniqueKey(Users.USERS, DSL.name("uk_users_cognito_sub"), new TableField[] { Users.USERS.COGNITO_SUB }, true);
     public static final UniqueKey<UsersRecord> UK_USERS_PUBLIC_ID = Internal.createUniqueKey(Users.USERS, DSL.name("uk_users_public_id"), new TableField[] { Users.USERS.PUBLIC_ID }, true);
     public static final UniqueKey<UsersRecord> USERS_PKEY = Internal.createUniqueKey(Users.USERS, DSL.name("users_pkey"), new TableField[] { Users.USERS.ID }, true);
@@ -45,8 +77,17 @@ public class Keys {
     // FOREIGN KEY definitions
     // -------------------------------------------------------------------------
 
+    public static final ForeignKey<AgentDispatchesRecord, DevicesRecord> AGENT_DISPATCHES__FK_DISPATCH_DEVICE = Internal.createForeignKey(AgentDispatches.AGENT_DISPATCHES, DSL.name("fk_dispatch_device"), new TableField[] { AgentDispatches.AGENT_DISPATCHES.DEVICE_ID }, Keys.DEVICES_PKEY, new TableField[] { Devices.DEVICES.ID }, true);
+    public static final ForeignKey<AgentDispatchesRecord, TasksRecord> AGENT_DISPATCHES__FK_DISPATCH_TASK_DEVICE = Internal.createForeignKey(AgentDispatches.AGENT_DISPATCHES, DSL.name("fk_dispatch_task_device"), new TableField[] { AgentDispatches.AGENT_DISPATCHES.TASK_ID, AgentDispatches.AGENT_DISPATCHES.DEVICE_ID }, Keys.UK_TASKS_ID_DEVICE, new TableField[] { Tasks.TASKS.ID, Tasks.TASKS.DEVICE_ID }, true);
+    public static final ForeignKey<AsyncJobsRecord, TasksRecord> ASYNC_JOBS__FK_ASYNC_JOBS_TASK = Internal.createForeignKey(AsyncJobs.ASYNC_JOBS, DSL.name("fk_async_jobs_task"), new TableField[] { AsyncJobs.ASYNC_JOBS.TASK_ID }, Keys.TASKS_PKEY, new TableField[] { Tasks.TASKS.ID }, true);
+    public static final ForeignKey<AuditEventsRecord, UsersRecord> AUDIT_EVENTS__FK_AUDIT_EVENTS_USER = Internal.createForeignKey(AuditEvents.AUDIT_EVENTS, DSL.name("fk_audit_events_user"), new TableField[] { AuditEvents.AUDIT_EVENTS.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true);
     public static final ForeignKey<DeviceCapabilitiesRecord, DevicesRecord> DEVICE_CAPABILITIES__FK_DEVICE_CAPABILITIES_DEVICE = Internal.createForeignKey(DeviceCapabilities.DEVICE_CAPABILITIES, DSL.name("fk_device_capabilities_device"), new TableField[] { DeviceCapabilities.DEVICE_CAPABILITIES.DEVICE_ID }, Keys.DEVICES_PKEY, new TableField[] { Devices.DEVICES.ID }, true);
     public static final ForeignKey<DevicePairingRequestsRecord, DevicesRecord> DEVICE_PAIRING_REQUESTS__FK_PAIRING_CONSUMED_DEVICE = Internal.createForeignKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("fk_pairing_consumed_device"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.CONSUMED_DEVICE_ID }, Keys.DEVICES_PKEY, new TableField[] { Devices.DEVICES.ID }, true);
     public static final ForeignKey<DevicePairingRequestsRecord, UsersRecord> DEVICE_PAIRING_REQUESTS__FK_PAIRING_USER = Internal.createForeignKey(DevicePairingRequests.DEVICE_PAIRING_REQUESTS, DSL.name("fk_pairing_user"), new TableField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true);
     public static final ForeignKey<DevicesRecord, UsersRecord> DEVICES__FK_DEVICES_USER = Internal.createForeignKey(Devices.DEVICES, DSL.name("fk_devices_user"), new TableField[] { Devices.DEVICES.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true);
+    public static final ForeignKey<IdempotencyRecordsRecord, TasksRecord> IDEMPOTENCY_RECORDS__FK_IDEMPOTENCY_TASK = Internal.createForeignKey(IdempotencyRecords.IDEMPOTENCY_RECORDS, DSL.name("fk_idempotency_task"), new TableField[] { IdempotencyRecords.IDEMPOTENCY_RECORDS.TASK_ID }, Keys.TASKS_PKEY, new TableField[] { Tasks.TASKS.ID }, true);
+    public static final ForeignKey<IdempotencyRecordsRecord, UsersRecord> IDEMPOTENCY_RECORDS__FK_IDEMPOTENCY_USER = Internal.createForeignKey(IdempotencyRecords.IDEMPOTENCY_RECORDS, DSL.name("fk_idempotency_user"), new TableField[] { IdempotencyRecords.IDEMPOTENCY_RECORDS.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true);
+    public static final ForeignKey<TaskEventsRecord, TasksRecord> TASK_EVENTS__FK_TASK_EVENTS_TASK = Internal.createForeignKey(TaskEvents.TASK_EVENTS, DSL.name("fk_task_events_task"), new TableField[] { TaskEvents.TASK_EVENTS.TASK_ID }, Keys.TASKS_PKEY, new TableField[] { Tasks.TASKS.ID }, true);
+    public static final ForeignKey<TasksRecord, DevicesRecord> TASKS__FK_TASKS_DEVICE = Internal.createForeignKey(Tasks.TASKS, DSL.name("fk_tasks_device"), new TableField[] { Tasks.TASKS.DEVICE_ID }, Keys.DEVICES_PKEY, new TableField[] { Devices.DEVICES.ID }, true);
+    public static final ForeignKey<TasksRecord, UsersRecord> TASKS__FK_TASKS_USER = Internal.createForeignKey(Tasks.TASKS, DSL.name("fk_tasks_user"), new TableField[] { Tasks.TASKS.USER_ID }, Keys.USERS_PKEY, new TableField[] { Users.USERS.ID }, true);
 }

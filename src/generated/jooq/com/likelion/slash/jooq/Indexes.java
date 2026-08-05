@@ -4,8 +4,14 @@
 package com.likelion.slash.jooq;
 
 
+import com.likelion.slash.jooq.tables.AgentDispatches;
+import com.likelion.slash.jooq.tables.AsyncJobs;
+import com.likelion.slash.jooq.tables.AuditEvents;
 import com.likelion.slash.jooq.tables.DevicePairingRequests;
 import com.likelion.slash.jooq.tables.Devices;
+import com.likelion.slash.jooq.tables.IdempotencyRecords;
+import com.likelion.slash.jooq.tables.OutboxEvents;
+import com.likelion.slash.jooq.tables.Tasks;
 
 import org.jooq.Index;
 import org.jooq.OrderField;
@@ -23,7 +29,18 @@ public class Indexes {
     // INDEX definitions
     // -------------------------------------------------------------------------
 
+    public static final Index IDX_ASYNC_JOBS_ACTIVE_DEADLINE = Internal.createIndex(DSL.name("idx_async_jobs_active_deadline"), AsyncJobs.ASYNC_JOBS, new OrderField[] { AsyncJobs.ASYNC_JOBS.DEADLINE_AT }, false);
+    public static final Index IDX_AUDIT_TARGET = Internal.createIndex(DSL.name("idx_audit_target"), AuditEvents.AUDIT_EVENTS, new OrderField[] { AuditEvents.AUDIT_EVENTS.TARGET_TYPE, AuditEvents.AUDIT_EVENTS.TARGET_PUBLIC_ID, AuditEvents.AUDIT_EVENTS.OCCURRED_AT.desc() }, false);
+    public static final Index IDX_AUDIT_USER_TIME = Internal.createIndex(DSL.name("idx_audit_user_time"), AuditEvents.AUDIT_EVENTS, new OrderField[] { AuditEvents.AUDIT_EVENTS.USER_ID, AuditEvents.AUDIT_EVENTS.OCCURRED_AT.desc() }, false);
     public static final Index IDX_DEVICES_USER_STATUS = Internal.createIndex(DSL.name("idx_devices_user_status"), Devices.DEVICES, new OrderField[] { Devices.DEVICES.USER_ID, Devices.DEVICES.STATUS }, false);
+    public static final Index IDX_DISPATCH_ACTIVE_EXPIRES = Internal.createIndex(DSL.name("idx_dispatch_active_expires"), AgentDispatches.AGENT_DISPATCHES, new OrderField[] { AgentDispatches.AGENT_DISPATCHES.EXPIRES_AT }, false);
+    public static final Index IDX_DISPATCH_DEVICE_STATUS = Internal.createIndex(DSL.name("idx_dispatch_device_status"), AgentDispatches.AGENT_DISPATCHES, new OrderField[] { AgentDispatches.AGENT_DISPATCHES.DEVICE_ID, AgentDispatches.AGENT_DISPATCHES.STATUS }, false);
+    public static final Index IDX_IDEMPOTENCY_EXPIRES = Internal.createIndex(DSL.name("idx_idempotency_expires"), IdempotencyRecords.IDEMPOTENCY_RECORDS, new OrderField[] { IdempotencyRecords.IDEMPOTENCY_RECORDS.EXPIRES_AT }, false);
+    public static final Index IDX_OUTBOX_UNPUBLISHED = Internal.createIndex(DSL.name("idx_outbox_unpublished"), OutboxEvents.OUTBOX_EVENTS, new OrderField[] { OutboxEvents.OUTBOX_EVENTS.AVAILABLE_AT, OutboxEvents.OUTBOX_EVENTS.ID }, false);
     public static final Index IDX_PAIRING_PENDING_EXPIRES = Internal.createIndex(DSL.name("idx_pairing_pending_expires"), DevicePairingRequests.DEVICE_PAIRING_REQUESTS, new OrderField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.EXPIRES_AT }, false);
+    public static final Index IDX_TASKS_DEVICE_STATUS = Internal.createIndex(DSL.name("idx_tasks_device_status"), Tasks.TASKS, new OrderField[] { Tasks.TASKS.DEVICE_ID, Tasks.TASKS.STATUS }, false);
+    public static final Index IDX_TASKS_USER_CREATED = Internal.createIndex(DSL.name("idx_tasks_user_created"), Tasks.TASKS, new OrderField[] { Tasks.TASKS.USER_ID, Tasks.TASKS.CREATED_AT.desc(), Tasks.TASKS.ID.desc() }, false);
+    public static final Index UK_DISPATCH_ACTIVE_DEVICE = Internal.createIndex(DSL.name("uk_dispatch_active_device"), AgentDispatches.AGENT_DISPATCHES, new OrderField[] { AgentDispatches.AGENT_DISPATCHES.DEVICE_ID }, true);
+    public static final Index UK_DISPATCH_ACTIVE_TASK = Internal.createIndex(DSL.name("uk_dispatch_active_task"), AgentDispatches.AGENT_DISPATCHES, new OrderField[] { AgentDispatches.AGENT_DISPATCHES.TASK_ID }, true);
     public static final Index UK_PAIRING_ACTIVE_PER_USER = Internal.createIndex(DSL.name("uk_pairing_active_per_user"), DevicePairingRequests.DEVICE_PAIRING_REQUESTS, new OrderField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.USER_ID }, true);
 }

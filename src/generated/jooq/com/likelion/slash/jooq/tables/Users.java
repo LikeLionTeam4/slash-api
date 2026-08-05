@@ -6,8 +6,11 @@ package com.likelion.slash.jooq.tables;
 
 import com.likelion.slash.jooq.Keys;
 import com.likelion.slash.jooq.Public;
+import com.likelion.slash.jooq.tables.AuditEvents.AuditEventsPath;
 import com.likelion.slash.jooq.tables.DevicePairingRequests.DevicePairingRequestsPath;
 import com.likelion.slash.jooq.tables.Devices.DevicesPath;
+import com.likelion.slash.jooq.tables.IdempotencyRecords.IdempotencyRecordsPath;
+import com.likelion.slash.jooq.tables.Tasks.TasksPath;
 import com.likelion.slash.jooq.tables.records.UsersRecord;
 
 import java.time.OffsetDateTime;
@@ -190,6 +193,19 @@ public class Users extends TableImpl<UsersRecord> {
         return Arrays.asList(Keys.UK_USERS_COGNITO_SUB, Keys.UK_USERS_PUBLIC_ID);
     }
 
+    private transient AuditEventsPath _auditEvents;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.audit_events</code> table
+     */
+    public AuditEventsPath auditEvents() {
+        if (_auditEvents == null)
+            _auditEvents = new AuditEventsPath(this, null, Keys.AUDIT_EVENTS__FK_AUDIT_EVENTS_USER.getInverseKey());
+
+        return _auditEvents;
+    }
+
     private transient DevicesPath _devices;
 
     /**
@@ -203,6 +219,19 @@ public class Users extends TableImpl<UsersRecord> {
         return _devices;
     }
 
+    private transient IdempotencyRecordsPath _idempotencyRecords;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.idempotency_records</code> table
+     */
+    public IdempotencyRecordsPath idempotencyRecords() {
+        if (_idempotencyRecords == null)
+            _idempotencyRecords = new IdempotencyRecordsPath(this, null, Keys.IDEMPOTENCY_RECORDS__FK_IDEMPOTENCY_USER.getInverseKey());
+
+        return _idempotencyRecords;
+    }
+
     private transient DevicePairingRequestsPath _devicePairingRequests;
 
     /**
@@ -214,6 +243,18 @@ public class Users extends TableImpl<UsersRecord> {
             _devicePairingRequests = new DevicePairingRequestsPath(this, null, Keys.DEVICE_PAIRING_REQUESTS__FK_PAIRING_USER.getInverseKey());
 
         return _devicePairingRequests;
+    }
+
+    private transient TasksPath _tasks;
+
+    /**
+     * Get the implicit to-many join path to the <code>public.tasks</code> table
+     */
+    public TasksPath tasks() {
+        if (_tasks == null)
+            _tasks = new TasksPath(this, null, Keys.TASKS__FK_TASKS_USER.getInverseKey());
+
+        return _tasks;
     }
 
     @Override

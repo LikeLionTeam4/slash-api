@@ -267,8 +267,41 @@ class DeviceSchemaTest {
     }
 
     @Test
-    @DisplayName("등록에 사용된 기기를 삭제해도 페어링 이력이 남는다")
-    void 기기를_삭제해도_페어링_이력이_유지된다() {
+    @DisplayName("등록 해제하면 기기가 REVOKED 가 되고 페어링 이력은 그대로 남는다")
+    void 등록_해제는_상태_변경으로_처리된다() {
+        long userId = 사용자를_만든다();
+        long deviceId = 기기를_만든다(userId, "해제할 PC");
+
+        dsl.insertInto(DEVICE_PAIRING_REQUESTS)
+                .set(DEVICE_PAIRING_REQUESTS.USER_ID, userId)
+                .set(DEVICE_PAIRING_REQUESTS.CODE_HASH, "revoke-code")
+                .set(DEVICE_PAIRING_REQUESTS.STATUS, "COMPLETED")
+                .set(DEVICE_PAIRING_REQUESTS.EXPIRES_AT, OffsetDateTime.now().plusMinutes(5))
+                .set(DEVICE_PAIRING_REQUESTS.CONSUMED_AT, OffsetDateTime.now())
+                .set(DEVICE_PAIRING_REQUESTS.CONSUMED_DEVICE_ID, deviceId)
+                .execute();
+
+        // DELETE /devices/{deviceId} 는 행 삭제가 아니라 상태 변경으로 구현한다.
+        // 작업 이력(tasks.device_id)이 기기를 참조하므로 하드 삭제는 막혀 있다.
+        int updated = dsl.update(DEVICES)
+                .set(DEVICES.STATUS, "REVOKED")
+                .set(DEVICES.REVOKED_AT, OffsetDateTime.now())
+                .where(DEVICES.ID.eq(deviceId))
+                .execute();
+
+        assertThat(updated).isEqualTo(1);
+
+        var pairing = dsl.selectFrom(DEVICE_PAIRING_REQUESTS)
+                .where(DEVICE_PAIRING_REQUESTS.CODE_HASH.eq("revoke-code"))
+                .fetchOne();
+
+        assertThat(pairing).isNotNull();
+        assertThat(pairing.getConsumedDeviceId()).isEqualTo(deviceId);
+    }
+
+    @Test
+    @DisplayName("기기를 하드 삭제하면 페어링 이력의 기기 참조만 끊긴다")
+    void 기기를_하드_삭제해도_페어링_이력이_유지된다() {
         long userId = 사용자를_만든다();
         long deviceId = 기기를_만든다(userId, "해제할 PC");
 

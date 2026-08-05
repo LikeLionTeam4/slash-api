@@ -38,4 +38,20 @@ class TimeZoneContractTest {
         OffsetDateTime now = (OffsetDateTime) dsl.fetchValue("SELECT now()");
         assertThat(now.getOffset().getTotalSeconds()).isEqualTo(9 * 3600);
     }
+
+    @Test
+    @DisplayName("DB 서버 기본 시간대도 Asia/Seoul 이다")
+    void db_서버_기본_시간대도_한국이다() {
+        // 앱은 JDBC Session 에서 시간대를 걸지만, psql·관리 도구로 직접 조회할 때도
+        // 별도 변환 없이 한국 시각으로 보여야 한다. (메시지 프로토콜 정의 3.5)
+        // 로컬은 docker-compose 의 postgres -c timezone, 배포 환경은 RDS 파라미터 그룹으로 맞춘다.
+        //
+        // setting 은 Session 에서 SET 한 값이라 서버 기본값을 확인할 수 없고,
+        // boot_val 은 컴파일 기본값(GMT)이라 설정과 무관하다.
+        // reset_val 이 Session 설정과 무관하게 서버·데이터베이스 기본값을 유지한다.
+        String serverDefault = dsl.fetchValue(
+                "SELECT reset_val FROM pg_settings WHERE name = 'TimeZone'").toString();
+
+        assertThat(serverDefault).isEqualTo("Asia/Seoul");
+    }
 }
