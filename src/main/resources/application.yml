@@ -59,6 +59,20 @@ management:
 # 애플리케이션 고유 설정
 # ---------------------------------------------------------------------------
 slash:
+  auth:
+    cognito:
+      # Hosted UI 도메인 아래의 userInfo 주소.
+      # 예: https://slash.auth.ap-northeast-2.amazoncognito.com/oauth2/userInfo
+      #
+      # Access Token 에는 이메일이 없어서 사용자를 처음 만들 때 여기서 받아 온다.
+      # 스코프에 email 이 포함돼 있어야 한다.
+      user-info-uri: ${COGNITO_USER_INFO_URI:}
+
+  cors:
+    # 브라우저에서 API 를 호출할 수 있는 오리진. 환경마다 다르다.
+    # 기본값은 웹 클라이언트(Vite) 로컬 개발 서버다.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
   nlu:
     # Helm 배포에서는 같은 Namespace 의 짧은 주소를 주입한다. (문서 3.1.1)
     # Namespace 를 코드에 고정하지 않는다.
