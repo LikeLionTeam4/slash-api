@@ -1,0 +1,268 @@
+package com.likelion.slash.task;
+
+import static com.likelion.slash.jooq.Tables.TASKS;
+
+import com.likelion.slash.common.SlashTime;
+import com.likelion.slash.common.enums.ProcessingRoute;
+import com.likelion.slash.common.enums.TaskStatus;
+import com.likelion.slash.common.enums.TaskType;
+import com.likelion.slash.common.error.ErrorCode;
+import com.likelion.slash.jooq.tables.records.TasksRecord;
+import java.time.OffsetDateTime;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.jooq.Condition;
+import org.jooq.DSLContext;
+import org.jooq.JSONB;
+import org.jooq.impl.DSL;
+import org.springframework.stereotype.Repository;
+
+/**
+ * {@code tasks} 접근.
+ *
+ * <p>사용자 요청의 최종 원장이다. 즉시 끝나는 요청도 이력을 일관되게 만들기 위해 Task 를 만든다. (문서 3.4.6)
+ *
+ * <p><b>상태 전이</b> — 모든 전이 메서드는 다음 두 가지를 함께 지킨다.
+ * <ol>
+ *   <li>{@link TaskStatus#canTransitionTo} 로 계약상 허용된 전이인지 Java 에서 먼저 확인한다</li>
+ *   <li>{@code WHERE status = 기대값} 으로 DB 에서 한 번 더 비교한다 (compare-and-set)</li>
+ * </ol>
+ * 두 번째가 없으면 두 요청이 동시에 같은 Task 를 옮길 때 나중 것이 앞선 전이를 덮어쓴다.
+ * 반환값이 거짓이면 다른 곳에서 먼저 상태를 바꾼 것이므로 서비스는 409 로 응답한다. (문서 3.10)
+ *
+ * <p>상태 전이와 {@code task_events} 기록은 반드시 같은 트랜잭션에서 수행한다.
+ * {@link TaskEventRepository#append} 를 참고한다.
+ *
+ * <p>관련 문서: 3.4.6~3.4.8 · 3.10 · WBS W1-04
+ */
+@Repository
+public class TaskRepository {
+
+    /** 아직 결과가 확정되지 않은 상태. 기기당 동시 작업 1건 판정에 쓴다. */
+    private static final List<String> ACTIVE_STATUSES = Arrays.stream(TaskStatus.values())
+            .filter(status -> !status.isTerminal())
+            .map(TaskStatus::name)
+            .toList();
+
+    private final DSLContext dsl;
+
+    public TaskRepository(DSLContext dsl) {
+        this.dsl = dsl;
+    }
+
+    // ------------------------------------------------------------------
+    // 생성·조회
+    // ------------------------------------------------------------------
+
+    /**
+     * 요청을 접수한다.
+     *
+     * <p>분석 전에도 요청을 추적할 수 있도록 원문을 먼저 저장한다.
+     * 작업 유형과 처리 경로는 NLU 응답을 검증한 뒤 {@link #applyAnalysis} 로 채운다.
+     */
+    public TasksRecord create(long userId, String inputText, UUID correlationId) {
+        return dsl.insertInto(TASKS)
+                .set(TASKS.USER_ID, userId)
+                .set(TASKS.INPUT_TEXT, inputText)
+                .set(TASKS.CORRELATION_ID, correlationId)
+                .returning()
+                .fetchOne();
+    }
+
+    /** 소유권을 강제한 단건 조회. 남의 작업이면 비어 있다. (문서 3.2.3) */
+    public Optional<TasksRecord> findByPublicIdAndUserId(UUID publicId, long userId) {
+        return dsl.selectFrom(TASKS)
+                .where(TASKS.PUBLIC_ID.eq(publicId))
+                .and(TASKS.USER_ID.eq(userId))
+                .fetchOptional();
+    }
+
+    /** Agent·Worker 결과 반영처럼 사용자 맥락이 없는 경로에서 사용한다. */
+    public Optional<TasksRecord> findById(long id) {
+        return dsl.selectFrom(TASKS)
+                .where(TASKS.ID.eq(id))
+                .fetchOptional();
+    }
+
+    /**
+     * 최근 이력을 커서 방식으로 읽는다. ({@code idx_tasks_user_created})
+     *
+     * <p>OFFSET 을 쓰지 않으므로 목록을 넘기는 동안 새 작업이 생겨도 항목이 밀리거나 겹치지 않는다.
+     * 다음 쪽을 요청할 때는 마지막 행의 {@code created_at} 과 {@code id} 를 그대로 넘긴다.
+     *
+     * @param cursorCreatedAt 첫 쪽이면 {@code null}
+     * @param cursorId        첫 쪽이면 {@code null}
+     */
+    public List<TasksRecord> findRecent(long userId,
+                                        OffsetDateTime cursorCreatedAt,
+                                        Long cursorId,
+                                        int limit) {
+        Condition afterCursor = (cursorCreatedAt == null || cursorId == null)
+                ? DSL.noCondition()
+                : DSL.row(TASKS.CREATED_AT, TASKS.ID).lt(cursorCreatedAt, cursorId);
+
+        return dsl.selectFrom(TASKS)
+                .where(TASKS.USER_ID.eq(userId))
+                .and(afterCursor)
+                .orderBy(TASKS.CREATED_AT.desc(), TASKS.ID.desc())
+                .limit(limit)
+                .fetch();
+    }
+
+    /**
+     * 이 기기가 이미 다른 작업을 실행 중인지 확인한다. (P0 는 기기당 동시 1건)
+     *
+     * <p>최종 판정은 {@code agent_dispatches} 의 부분 UNIQUE 제약이 하므로 여기서는
+     * 요청을 받자마자 DEVICE_BUSY 로 빠르게 되돌려 주기 위한 사전 확인으로만 쓴다.
+     */
+    public boolean hasActiveTaskOnDevice(long deviceId) {
+        return dsl.fetchExists(
+                dsl.selectFrom(TASKS)
+                        .where(TASKS.DEVICE_ID.eq(deviceId))
+                        .and(TASKS.STATUS.in(ACTIVE_STATUSES)));
+    }
+
+    /**
+     * 작업 행을 잠근다. {@code task_events.sequence} 채번과 상태 전이의 직렬화 기준점이다.
+     *
+     * <p>잠금은 호출한 트랜잭션이 끝날 때 풀린다.
+     */
+    public Optional<TasksRecord> lockById(long id) {
+        return dsl.selectFrom(TASKS)
+                .where(TASKS.ID.eq(id))
+                .forUpdate()
+                .fetchOptional();
+    }
+
+    // ------------------------------------------------------------------
+    // 분석 결과 반영
+    // ------------------------------------------------------------------
+
+    /**
+     * NLU 분석 결과와 slash-api 가 결정한 처리 경로를 반영한다.
+     *
+     * <p>처리 경로는 Tool 정책에 따라 slash-api 가 정한다. NLU 가 직접 정하지 않는다.
+     * {@code ck_tasks_local_agent_requires_device} 가 있으므로 로컬 실행 작업에는
+     * 반드시 대상 기기를 함께 넘겨야 한다.
+     *
+     * @return 반영 여부. 거짓이면 이미 다른 상태로 넘어간 작업이다.
+     */
+    public boolean applyAnalysis(long id,
+                                 TaskType taskType,
+                                 ProcessingRoute processingRoute,
+                                 Long deviceId,
+                                 JSONB parameters,
+                                 String requestSummary) {
+        if (processingRoute == ProcessingRoute.LOCAL_AGENT && deviceId == null) {
+            throw new IllegalArgumentException("로컬 실행 작업에는 대상 기기가 필요합니다. taskId=" + id);
+        }
+
+        return dsl.update(TASKS)
+                .set(TASKS.TASK_TYPE, taskType.name())
+                .set(TASKS.PROCESSING_ROUTE, processingRoute.name())
+                .set(TASKS.DEVICE_ID, deviceId)
+                .set(TASKS.PARAMETERS, parameters)
+                .set(TASKS.REQUEST_SUMMARY, requestSummary)
+                .set(TASKS.VERSION, TASKS.VERSION.plus(1))
+                .where(TASKS.ID.eq(id))
+                .and(TASKS.STATUS.eq(TaskStatus.ANALYZING.name()))
+                .execute() == 1;
+    }
+
+    // ------------------------------------------------------------------
+    // 상태 전이
+    // ------------------------------------------------------------------
+
+    /**
+     * 중간 상태로 옮긴다.
+     *
+     * <p>최종 상태는 결과나 오류 코드를 함께 써야 {@code ck_tasks_completed_at} 을 만족하므로
+     * {@link #succeed} · {@link #finishWithError} 를 쓴다.
+     *
+     * @return 반영 여부. 거짓이면 현재 상태가 {@code expected} 가 아니다.
+     */
+    public boolean transition(long id, TaskStatus expected, TaskStatus next) {
+        if (next.isTerminal()) {
+            throw new IllegalArgumentException(
+                    "최종 상태로의 전이는 succeed·finishWithError 를 사용합니다. next=" + next);
+        }
+        requireAllowed(expected, next);
+
+        return dsl.update(TASKS)
+                .set(TASKS.STATUS, next.name())
+                .set(TASKS.VERSION, TASKS.VERSION.plus(1))
+                .where(TASKS.ID.eq(id))
+                .and(TASKS.STATUS.eq(expected.name()))
+                .execute() == 1;
+    }
+
+    /**
+     * 결과를 저장하고 성공으로 마감한다.
+     *
+     * <p>{@code result} 는 64KB 를 넘을 수 없다. ({@code ck_tasks_result_size})
+     * Agent 가 이미 {@code limit}·{@code truncated} 로 줄여 보내지만 상한을 넘으면 DB 가 거부한다.
+     */
+    public boolean succeed(long id, TaskStatus expected, JSONB result) {
+        requireAllowed(expected, TaskStatus.SUCCEEDED);
+
+        return dsl.update(TASKS)
+                .set(TASKS.STATUS, TaskStatus.SUCCEEDED.name())
+                .set(TASKS.RESULT, result)
+                .set(TASKS.COMPLETED_AT, SlashTime.now())
+                .set(TASKS.VERSION, TASKS.VERSION.plus(1))
+                .where(TASKS.ID.eq(id))
+                .and(TASKS.STATUS.eq(expected.name()))
+                .execute() == 1;
+    }
+
+    /**
+     * 실패 또는 기한 만료로 마감한다.
+     *
+     * <p>{@code ck_tasks_result_or_error} 때문에 성공 결과와 오류 코드는 함께 있을 수 없다.
+     * 부분 결과가 남아 있어도 실패로 마감할 때는 지운다.
+     *
+     * @param terminal {@link TaskStatus#FAILED} 또는 {@link TaskStatus#EXPIRED}
+     */
+    public boolean finishWithError(long id, TaskStatus expected, TaskStatus terminal, ErrorCode errorCode) {
+        if (terminal != TaskStatus.FAILED && terminal != TaskStatus.EXPIRED) {
+            throw new IllegalArgumentException("실패 마감은 FAILED·EXPIRED 만 가능합니다. terminal=" + terminal);
+        }
+        requireAllowed(expected, terminal);
+
+        return dsl.update(TASKS)
+                .set(TASKS.STATUS, terminal.name())
+                .set(TASKS.ERROR_CODE, errorCode.name())
+                .set(TASKS.RESULT, (JSONB) null)
+                .set(TASKS.COMPLETED_AT, SlashTime.now())
+                .set(TASKS.VERSION, TASKS.VERSION.plus(1))
+                .where(TASKS.ID.eq(id))
+                .and(TASKS.STATUS.eq(expected.name()))
+                .execute() == 1;
+    }
+
+    /**
+     * 기한이 지난 미완료 작업을 만료로 마감한다. 배치가 주기적으로 호출한다.
+     *
+     * @param createdBefore 이 시각 이전에 만들어진 미완료 작업을 대상으로 한다
+     * @return 마감한 건수
+     */
+    public int expireOverdue(OffsetDateTime createdBefore) {
+        return dsl.update(TASKS)
+                .set(TASKS.STATUS, TaskStatus.EXPIRED.name())
+                .set(TASKS.ERROR_CODE, ErrorCode.TASK_EXPIRED.name())
+                .set(TASKS.RESULT, (JSONB) null)
+                .set(TASKS.COMPLETED_AT, SlashTime.now())
+                .set(TASKS.VERSION, TASKS.VERSION.plus(1))
+                .where(TASKS.STATUS.in(ACTIVE_STATUSES))
+                .and(TASKS.CREATED_AT.lt(createdBefore))
+                .execute();
+    }
+
+    private static void requireAllowed(TaskStatus from, TaskStatus to) {
+        if (!from.canTransitionTo(to)) {
+            throw new IllegalArgumentException("허용되지 않은 상태 전이입니다. " + from + " -> " + to);
+        }
+    }
+}
