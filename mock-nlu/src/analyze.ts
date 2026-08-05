@@ -65,6 +65,9 @@ function analyzeSlashCommand(command: string, rest: string): NluResult {
     case "CODE_ANALYSIS":
       if (trimmedRest) parameters.workspaceHint = trimmedRest;
       break;
+    case "COMMAND":
+      if (trimmedRest) parameters.command = trimmedRest;
+      break;
   }
 
   return {
