@@ -20,6 +20,12 @@ spring:
         jwt:
           issuer-uri: ${COGNITO_ISSUER_URI}
 
+slash:
+  auth:
+    cognito:
+      client-id: ${COGNITO_CLIENT_ID}
+      user-info-uri: ${COGNITO_USER_INFO_URI}
+
 logging:
   level:
     com.likelion.slash: INFO

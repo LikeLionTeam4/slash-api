@@ -14,6 +14,17 @@ spring:
       host: localhost
       port: 6379
 
+slash:
+  auth:
+    # Cognito 값이 나오기 전까지 쓰는 임시 인증. 토큰 서명을 검증하지 않는다.
+    #
+    #   curl -H "Authorization: Bearer alice" http://localhost:8080/api/v1/me
+    #
+    # local 프로필에서만 읽히므로 dev·demo 에는 영향이 없다.
+    # Cognito 가 준비되면 false 로 바꾸고 issuer-uri 를 넣는다.
+    local-dev-token:
+      enabled: true
+
 logging:
   level:
     com.likelion.slash: DEBUG

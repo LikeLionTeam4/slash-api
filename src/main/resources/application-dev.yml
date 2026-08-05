@@ -22,6 +22,15 @@ spring:
           # 예: https://cognito-idp.ap-northeast-2.amazonaws.com/{userPoolId}
           issuer-uri: ${COGNITO_ISSUER_URI}
 
+slash:
+  auth:
+    cognito:
+      # 이 App Client 가 발급받은 토큰만 받아들인다.
+      # 같은 User Pool 에 붙은 다른 Client 의 토큰을 걸러내는 기준이다.
+      client-id: ${COGNITO_CLIENT_ID}
+      # 없으면 첫 로그인에서 이메일을 구하지 못한다. 기동 시점에 실패하도록 기본값을 두지 않는다.
+      user-info-uri: ${COGNITO_USER_INFO_URI}
+
 logging:
   level:
     com.likelion.slash: INFO
