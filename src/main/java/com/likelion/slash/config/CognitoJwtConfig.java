@@ -1,7 +1,9 @@
 package com.likelion.slash.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
@@ -12,6 +14,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtDecoders;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.util.StringUtils;
 
 /**
  * Cognito Access Token 검증기.
@@ -33,17 +36,44 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
  * <p>관련 문서: 3.2.1 · WBS W1-01
  */
 @Configuration
-@ConditionalOnProperty(prefix = "spring.security.oauth2.resourceserver.jwt", name = "issuer-uri")
+@ConditionalOnExpression(CognitoJwtConfig.ISSUER_CONFIGURED)
 public class CognitoJwtConfig {
+
+    /**
+     * 발급자 주소가 실제로 채워졌을 때만 이 설정을 만든다.
+     *
+     * <p>{@code @ConditionalOnProperty} 는 값이 빈 문자열이어도 "있다"고 판단한다.
+     * 로컬은 {@code ${COGNITO_ISSUER_URI:}} 처럼 빈 기본값을 두므로,
+     * 그대로 두면 환경 변수가 없는 개발자·CI 에서 빈 주소로 검증기를 만들려다 기동이 실패한다.
+     */
+    static final String ISSUER_CONFIGURED =
+            "'${spring.security.oauth2.resourceserver.jwt.issuer-uri:}'.trim().length() > 0";
+
+    private static final Logger log = LoggerFactory.getLogger(CognitoJwtConfig.class);
 
     @Bean
     JwtDecoder jwtDecoder(
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri,
-            @Value("${slash.auth.cognito.client-id}") String clientId) {
+            @Value("${slash.auth.cognito.client-id:}") String clientId,
+            @Value("${slash.auth.cognito.user-info-uri:}") String userInfoUri) {
+
+        // 발급자만 넣고 나머지를 빠뜨리면 토큰이 조용히 전부 거부되거나
+        // 최초 로그인에서만 실패한다. 기동 시점에 알려주는 편이 낫다.
+        requireConfigured(clientId, "slash.auth.cognito.client-id (COGNITO_CLIENT_ID)");
+        requireConfigured(userInfoUri, "slash.auth.cognito.user-info-uri (COGNITO_USER_INFO_URI)");
+
+        log.info("Cognito 토큰 검증을 사용합니다. issuer={}", issuerUri);
 
         NimbusJwtDecoder decoder = JwtDecoders.fromIssuerLocation(issuerUri);
         decoder.setJwtValidator(cognitoAccessTokenValidator(issuerUri, clientId));
         return decoder;
+    }
+
+    private static void requireConfigured(String value, String name) {
+        if (!StringUtils.hasText(value)) {
+            throw new IllegalStateException(
+                    "Cognito 발급자를 설정했으면 " + name + " 도 함께 넣어야 합니다.");
+        }
     }
 
     /** 기본 검증(서명·발급자·만료)에 Cognito 고유 검증을 더한다. */
