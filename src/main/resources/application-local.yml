@@ -14,16 +14,28 @@ spring:
       host: localhost
       port: 6379
 
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # 값이 있으면 실제 Cognito 검증으로 전환된다. (아래 임시 인증은 자동으로 꺼진다)
+          # 로컬 User Pool 값은 저장소에 두지 않고 환경 변수로 넣는다. README 참고.
+          issuer-uri: ${COGNITO_ISSUER_URI:}
+
 slash:
   auth:
-    # Cognito 값이 나오기 전까지 쓰는 임시 인증. 토큰 서명을 검증하지 않는다.
+    # Cognito 값이 없을 때 쓰는 임시 인증. 토큰 서명을 검증하지 않는다.
     #
     #   curl -H "Authorization: Bearer alice" http://localhost:8080/api/v1/me
     #
     # local 프로필에서만 읽히므로 dev·demo 에는 영향이 없다.
-    # Cognito 가 준비되면 false 로 바꾸고 issuer-uri 를 넣는다.
+    # COGNITO_ISSUER_URI 를 넣으면 이 값이 true 여도 켜지지 않는다.
     local-dev-token:
       enabled: true
+
+    cognito:
+      client-id: ${COGNITO_CLIENT_ID:}
+      user-info-uri: ${COGNITO_USER_INFO_URI:}
 
 logging:
   level:
