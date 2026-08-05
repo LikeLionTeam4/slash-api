@@ -1,0 +1,24 @@
+{
+  "name": "@slash-api-mock/mock-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@slash-api-mock/contracts": "*",
+    "@slash-api-mock/mock-llm": "*",
+    "@slash-api-mock/mock-nlu": "*",
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

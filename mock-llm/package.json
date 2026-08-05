@@ -1,0 +1,16 @@
+{
+  "name": "@slash-api-mock/mock-llm",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@slash-api-mock/contracts": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

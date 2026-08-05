@@ -3,6 +3,13 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
+# agent-test 브랜치 전용 — 로컬 에이전트 통신 확인용 mock-api (main에 머지 안 함)
+node_modules/
+mock-api/dist/
+mock-nlu/dist/
+mock-llm/dist/
+contracts/dist/
+
 # IDE
 .idea/
 *.iml
