@@ -6,10 +6,12 @@ import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AgentDispatchStatus;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.jooq.DSLContext;
+import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -31,11 +33,16 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class AgentDispatchRepository {
 
-    /** 부분 UNIQUE 인덱스가 한 건으로 제한하는 상태 목록. */
-    private static final List<String> ACTIVE_STATUSES = List.of(
-            AgentDispatchStatus.PENDING.name(),
-            AgentDispatchStatus.DISPATCHED.name(),
-            AgentDispatchStatus.ACKNOWLEDGED.name());
+    /**
+     * 부분 UNIQUE 인덱스가 한 건으로 제한하는 상태 목록.
+     *
+     * <p>목록을 여기서 따로 적지 않고 {@link AgentDispatchStatus#isActive()} 에서 끌어온다.
+     * 두 곳에 적으면 상태를 추가할 때 한쪽만 고쳐도 컴파일이 통과해 조용히 어긋난다.
+     */
+    private static final List<String> ACTIVE_STATUSES = Arrays.stream(AgentDispatchStatus.values())
+            .filter(AgentDispatchStatus::isActive)
+            .map(Enum::name)
+            .toList();
 
     private final DSLContext dsl;
 
@@ -92,6 +99,28 @@ public class AgentDispatchRepository {
                 .fetch();
     }
 
+    /**
+     * 아직 아무 Pod 도 내보내지 못한 전달을 찾는다. (스윕 재발행 대상)
+     *
+     * <p>PENDING 은 "발행은 했지만 소켓으로 나가지는 않았다"는 뜻이다. Pub/Sub 이 유실했거나
+     * 대상 Pod 이 재시작 중이었던 경우다. 실제로 나가면 DISPATCHED 가 되어 여기서 빠진다.
+     *
+     * <p>기한이 지난 전달은 다시 보내도 Agent 가 거부하므로 제외한다.
+     *
+     * @param createdBefore 이 시각 이전에 만들어진 것만. 방금 발행한 전달을 곧바로 다시 보내지 않는다.
+     * @param now           만료 판정 기준 시각
+     */
+    public List<AgentDispatchesRecord> findPendingForResend(
+            OffsetDateTime createdBefore, OffsetDateTime now, int limit) {
+        return dsl.selectFrom(AGENT_DISPATCHES)
+                .where(AGENT_DISPATCHES.STATUS.eq(AgentDispatchStatus.PENDING.name()))
+                .and(AGENT_DISPATCHES.CREATED_AT.le(createdBefore))
+                .and(AGENT_DISPATCHES.EXPIRES_AT.gt(now))
+                .orderBy(AGENT_DISPATCHES.CREATED_AT.asc())
+                .limit(limit)
+                .fetch();
+    }
+
     // ------------------------------------------------------------------
     // 전달 진행
     // ------------------------------------------------------------------
@@ -114,13 +143,26 @@ public class AgentDispatchRepository {
                 .execute() == 1;
     }
 
-    /** Agent 가 작업을 받아들였다. 같은 ACK 를 두 번 받아도 한 번만 반영된다. */
+    /**
+     * Agent 가 작업을 받아들였다. 같은 ACK 를 두 번 받아도 한 번만 반영된다.
+     *
+     * <p><b>PENDING 상태의 ACK 도 받는다.</b> 전달은 "소켓에 쓴 뒤" DISPATCHED 로 기록하는데,
+     * Agent 의 ACK 가 그 기록보다 먼저 도착할 수 있다. 실제로 로컬 확인에서 매번 그랬다.
+     * DISPATCHED 만 받으면 그 ACK 가 조용히 버려져 {@code acknowledged_at} 이 영영 비어 있게 된다.
+     * ACK 가 왔다는 것은 프레임이 나갔다는 뜻이므로 {@code dispatched_at} 도 여기서 채운다.
+     */
     public boolean acknowledge(long id) {
+        OffsetDateTime now = SlashTime.now();
+
         return dsl.update(AGENT_DISPATCHES)
                 .set(AGENT_DISPATCHES.STATUS, AgentDispatchStatus.ACKNOWLEDGED.name())
-                .set(AGENT_DISPATCHES.ACKNOWLEDGED_AT, SlashTime.now())
+                .set(AGENT_DISPATCHES.ACKNOWLEDGED_AT, now)
+                .set(AGENT_DISPATCHES.DISPATCHED_AT,
+                        DSL.coalesce(AGENT_DISPATCHES.DISPATCHED_AT, DSL.val(now)))
                 .where(AGENT_DISPATCHES.ID.eq(id))
-                .and(AGENT_DISPATCHES.STATUS.eq(AgentDispatchStatus.DISPATCHED.name()))
+                .and(AGENT_DISPATCHES.STATUS.in(
+                        AgentDispatchStatus.PENDING.name(),
+                        AgentDispatchStatus.DISPATCHED.name()))
                 .execute() == 1;
     }
 

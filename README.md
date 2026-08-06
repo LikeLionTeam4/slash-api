@@ -126,6 +126,7 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 | 문서 | 대상 | 내용 |
 |---|---|---|
 | [프론트엔드 연동 규약](docs/frontend-api-contract.md) | slash-web | 공통 헤더, 응답·오류 형식, 오류 코드, Cognito 인증 흐름, WSS Ticket |
+| [W1-06 WSS 멀티 Pod 라우팅](docs/w1-06-wss-routing.md) | 팀 · slash-infra | Pod 간 이벤트 전달 — 선택지 비교와 채택안(Valkey Pub/Sub) |
 
 ## 관련 저장소
 

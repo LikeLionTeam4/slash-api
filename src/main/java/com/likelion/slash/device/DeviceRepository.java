@@ -62,6 +62,18 @@ public class DeviceRepository {
                 .fetchOptional();
     }
 
+    /**
+     * 사용자 맥락 없이 공개 식별자로 조회한다. Agent WSS 인증처럼 아직 누구인지 모르는 경로에서 쓴다.
+     *
+     * <p>이 메서드만으로는 소유권을 확인할 수 없다. 호출부가 서명 검증 같은 별도 수단으로
+     * 요청자가 그 기기임을 증명한 뒤에 사용해야 한다. (문서 DV-04)
+     */
+    public Optional<DevicesRecord> findByPublicId(UUID publicId) {
+        return dsl.selectFrom(DEVICES)
+                .where(DEVICES.PUBLIC_ID.eq(publicId))
+                .fetchOptional();
+    }
+
     /** Agent 인증처럼 사용자 맥락이 없는 경로에서 사용한다. 호출부가 소유권을 따로 확인해야 한다. */
     public Optional<DevicesRecord> findById(long id) {
         return dsl.selectFrom(DEVICES)
