@@ -256,6 +256,51 @@ Agent 수신:  {"type":"TASK","dispatchId":"da0c61e7-…","taskType":"FILE_SEARC
 
 ---
 
+## 8. 프레임 계약 정렬 (2026-08-06)
+
+처음 구현할 때는 프레임 필드 이름을 스키마에서 유추했다. 이후 **실제 계약이 코드로 존재한다**는
+것을 확인했다. 문서 저장소가 아니라 slash-agent 안에 있다.
+
+| 무엇 | 어디 |
+|---|---|
+| 계약 원본 (zod 스키마) | `slash-agent/contracts/src/agentMessages.ts` |
+| 서버 쪽 참조 구현 | `slash-api` 의 `slash-api-test` 브랜치 `mock-api/src/agentWss.ts` |
+| 실제 주고받는 JSON 예시 | `slash-agent/docs/MESSAGE_GUIDE.md` |
+
+**앞으로 계약을 확인할 때는 여기를 먼저 본다.** `slash-docs` 에는 아직 없다.
+
+대조해서 고친 것:
+
+| 어긋난 곳 | 결과 |
+|---|---|
+| 서명 대상이 nonce 원본 바이트 | 인증이 **항상** 실패 → `challengeId:nonce:deviceId` 문자열로 |
+| RESULT 를 `ok` boolean 으로 판정 | 성공이 **전부 실패로 기록** → `status: "SUCCEEDED"` 로 |
+| 공통 필드(`schemaVersion`·`eventId`·`sentAt`) 없음 | Agent 의 zod 가 메시지를 통째로 거부 → 전 프레임에 추가 |
+| CHALLENGE 에 `challengeId`·`expiresAt` 없음 | AUTH 를 대조할 수 없음 → 추가 |
+| 오류를 종료 코드로만 알림 | Agent 가 이유를 모른 채 재접속 반복 → `PROTOCOL_ERROR` 프레임으로 |
+| TASK 에 `payloadSha256` 없음 | 형식 검증 실패 → 참조 구현과 같은 방식으로 계산 |
+
+**라우팅 계층은 한 줄도 고치지 않았다.** 발행·구독·소켓 보관소·스윕은 프레임 모양과 무관하다.
+채택안을 고를 때 "되돌리기 쉬운가"를 근거로 삼은 것이 여기서 값을 했다.
+
+### 왕복 확인 기록
+
+시뮬레이터를 계약대로 고쳐(서명 대상·공통 필드) 2 Pod 구성에서 다시 확인했다.
+
+```
+전달 상태: COMPLETED | attempt_count=1 | dispatched_at ✓ | acknowledged_at ✓ | completed_at ✓
+```
+
+TASK 재발행 → Agent 의 ACK → RESULT 까지 한 번에 이어졌다.
+
+**이 확인에서 결함 하나를 찾았다.** 첫 실행에서 `acknowledged_at` 만 비어 있었다.
+전달은 소켓에 쓴 <b>뒤</b> DISPATCHED 로 기록하는데, Agent 의 ACK 가 그 기록보다 먼저 도착한다.
+`acknowledge()` 가 DISPATCHED 상태만 받고 있어서 그 ACK 가 조용히 버려지고 있었다.
+ACK 가 왔다는 것은 프레임이 나갔다는 뜻이므로, PENDING 상태의 ACK 도 받고 `dispatched_at` 을
+함께 채우도록 고쳤다. 시험만으로는 드러나지 않는 종류의 결함이다.
+
+---
+
 ## 7. 팀이 정해야 하는 것
 
 - [x] **A안 채택** (2026-08-06). 문서 3.8 에 "Pub/Sub 은 Pod 간 신호 용도로 허용" 한 줄을 추가해야 합니다.
@@ -266,8 +311,12 @@ Agent 수신:  {"type":"TASK","dispatchId":"da0c61e7-…","taskType":"FILE_SEARC
       `preStop` 지연(5.5)은 별건으로 요청합니다 — 이건 무중단 배포에 실제로 필요합니다.
 - [ ] **HPA 최대 replica 수.** B안으로 언제 승급할지의 판단 기준입니다.
       대략 **4 이하면 A 로 충분**하고, 그 이상이면 B 를 넣는 편이 낫습니다.
-- [ ] **slash-agent** — 재연결 시 미완료 전달을 다시 받는 것과, 같은 `dispatchId` 를 두 번 받으면
-      무시하는 것. 두 가지가 Agent 쪽에도 구현되어야 5.4 의 안전성이 성립합니다.
+- [x] **slash-agent** — 재연결 시 미완료 전달 재수신, 같은 전달 중복 무시.
+      **이미 구현되어 있습니다** (2026-08-06 확인). `taskId:dispatchId` 를 키로 캐시해 재실행 없이
+      기존 ACK·RESULT 를 돌려주고, 재연결 시 `resendUnackedResults` 로 다시 보냅니다.
+      다만 **Agent 는 `RESULT_ACK` 를 받아야 그 캐시를 지웁니다.** 우리가 아직 보내지 않으므로
+      재연결마다 과거 결과를 다시 보냅니다. 데이터는 안전하지만(활성 상태에서만 반영)
+      W1-04 에서 반드시 닫아야 하는 항목입니다.
 - [ ] **8/13 시연 범위** — 사용자 WSS 알림(`/ws/user`)도 같은 경로로 넣을지, 시연은 화면 재조회로
       갈음할지. 후자면 6장의 5번을 8/26 쪽으로 미룹니다.
 

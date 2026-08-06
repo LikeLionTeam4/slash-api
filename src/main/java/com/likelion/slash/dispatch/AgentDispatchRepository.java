@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.jooq.DSLContext;
+import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -142,13 +143,26 @@ public class AgentDispatchRepository {
                 .execute() == 1;
     }
 
-    /** Agent 가 작업을 받아들였다. 같은 ACK 를 두 번 받아도 한 번만 반영된다. */
+    /**
+     * Agent 가 작업을 받아들였다. 같은 ACK 를 두 번 받아도 한 번만 반영된다.
+     *
+     * <p><b>PENDING 상태의 ACK 도 받는다.</b> 전달은 "소켓에 쓴 뒤" DISPATCHED 로 기록하는데,
+     * Agent 의 ACK 가 그 기록보다 먼저 도착할 수 있다. 실제로 로컬 확인에서 매번 그랬다.
+     * DISPATCHED 만 받으면 그 ACK 가 조용히 버려져 {@code acknowledged_at} 이 영영 비어 있게 된다.
+     * ACK 가 왔다는 것은 프레임이 나갔다는 뜻이므로 {@code dispatched_at} 도 여기서 채운다.
+     */
     public boolean acknowledge(long id) {
+        OffsetDateTime now = SlashTime.now();
+
         return dsl.update(AGENT_DISPATCHES)
                 .set(AGENT_DISPATCHES.STATUS, AgentDispatchStatus.ACKNOWLEDGED.name())
-                .set(AGENT_DISPATCHES.ACKNOWLEDGED_AT, SlashTime.now())
+                .set(AGENT_DISPATCHES.ACKNOWLEDGED_AT, now)
+                .set(AGENT_DISPATCHES.DISPATCHED_AT,
+                        DSL.coalesce(AGENT_DISPATCHES.DISPATCHED_AT, DSL.val(now)))
                 .where(AGENT_DISPATCHES.ID.eq(id))
-                .and(AGENT_DISPATCHES.STATUS.eq(AgentDispatchStatus.DISPATCHED.name()))
+                .and(AGENT_DISPATCHES.STATUS.in(
+                        AgentDispatchStatus.PENDING.name(),
+                        AgentDispatchStatus.DISPATCHED.name()))
                 .execute() == 1;
     }
 

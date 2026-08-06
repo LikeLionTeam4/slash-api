@@ -85,6 +85,30 @@ class PendingDispatchSweeperTest {
         assertThat(frame.taskType()).isEqualTo("FILE_SEARCH");
         assertThat(frame.parameters().path("query").asText()).isEqualTo("보고서");
         assertThat(frame.expiresAt()).isEqualTo(dispatch.getExpiresAt());
+
+        // 계약이 요구하는 공통 필드. 하나라도 빠지면 Agent 가 메시지 전체를 거부한다.
+        assertThat(frame.schemaVersion()).isEqualTo("1.0");
+        assertThat(frame.eventId()).isNotNull();
+        assertThat(frame.sentAt()).isNotNull();
+        assertThat(frame.taskId()).isNotNull();
+        assertThat(frame.correlationId()).isNotNull();
+        assertThat(frame.payloadSha256()).matches("[0-9a-f]{64}");
+    }
+
+    @Test
+    @DisplayName("correlationId 가 없는 작업도 계약을 만족한다 — 재전송해도 같은 값이다")
+    void correlationId_가_없으면_작업_식별자를_쓴다() {
+        미전달_목록(전달());
+        작업_있음(TaskType.SYSTEM_STATUS, null, null);
+        잠금_획득(true);
+
+        sweeper.resendPending();
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(publisher).send(any(), anyLong(), captor.capture());
+
+        AgentTaskFrame frame = (AgentTaskFrame) captor.getValue();
+        assertThat(frame.correlationId()).isEqualTo(frame.taskId());
     }
 
     @Test
@@ -168,13 +192,17 @@ class PendingDispatchSweeperTest {
     }
 
     private void 작업_있음(TaskType taskType, String parameters) {
+        작업_있음(taskType, parameters, UUID.randomUUID());
+    }
+
+    private void 작업_있음(TaskType taskType, String parameters, UUID correlationId) {
         TasksRecord task = new TasksRecord();
         task.setId(작업_PK);
         task.setPublicId(UUID.randomUUID());
         task.setDeviceId(기기_PK);
         task.setTaskType(taskType == null ? null : taskType.name());
         task.setParameters(parameters == null ? null : JSONB.valueOf(parameters));
-        task.setCorrelationId(UUID.randomUUID());
+        task.setCorrelationId(correlationId);
 
         when(taskRepository.findById(작업_PK)).thenReturn(Optional.of(task));
     }

@@ -220,6 +220,38 @@ class AgentDispatchRepositoryTest {
                 .doesNotContain(dispatch.getId());
     }
 
+    @Test
+    @DisplayName("전송 기록보다 ACK 가 먼저 도착해도 반영한다")
+    void 전송_기록보다_빠른_ACK() {
+        long userId = 사용자(dsl);
+        long deviceId = 준비된_기기(dsl, userId);
+        long taskId = 작업(dsl, userId, deviceId, TaskStatus.QUEUED.name());
+        var dispatch = agentDispatchRepository.create(taskId, deviceId, SlashTime.now().plusMinutes(5));
+
+        // markDispatched 를 부르기 전, 즉 PENDING 인 상태에서 ACK 가 온 경우다.
+        // 소켓에 쓴 뒤 DISPATCHED 를 기록하므로 Agent 응답이 더 빠를 수 있다.
+        assertThat(agentDispatchRepository.acknowledge(dispatch.getId())).isTrue();
+
+        var 반영된_전달 = agentDispatchRepository.findByPublicId(dispatch.getPublicId()).orElseThrow();
+        assertThat(반영된_전달.getStatus()).isEqualTo(AgentDispatchStatus.ACKNOWLEDGED.name());
+        assertThat(반영된_전달.getAcknowledgedAt()).isNotNull();
+        // ACK 가 왔다는 것은 프레임이 나갔다는 뜻이므로 전송 시각도 채워져 있어야 한다.
+        assertThat(반영된_전달.getDispatchedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("이미 마감된 전달에는 ACK 를 반영하지 않는다")
+    void 마감된_전달의_ACK는_무시한다() {
+        long userId = 사용자(dsl);
+        long deviceId = 준비된_기기(dsl, userId);
+        long taskId = 작업(dsl, userId, deviceId, TaskStatus.QUEUED.name());
+        var dispatch = agentDispatchRepository.create(taskId, deviceId, SlashTime.now().plusMinutes(5));
+        agentDispatchRepository.markDispatched(dispatch.getId());
+        agentDispatchRepository.complete(dispatch.getId());
+
+        assertThat(agentDispatchRepository.acknowledge(dispatch.getId())).isFalse();
+    }
+
     /** 만들어진 지 시간이 지났는데도 아직 PENDING 인 전달. */
     private AgentDispatchesRecord 오래된_미전달_전달() {
         long userId = 사용자(dsl);

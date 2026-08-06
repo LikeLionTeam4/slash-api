@@ -1,11 +1,12 @@
 package com.likelion.slash.ws;
 
+import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.Signature;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 import java.util.HexFormat;
-import java.security.spec.X509EncodedKeySpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -16,12 +17,16 @@ import org.springframework.stereotype.Component;
  * <p>개인키는 사용자 PC 밖으로 나오지 않는다. (문서 LA-01)
  * 연결마다 새 도전값에 서명을 받으므로, 지난 연결에서 오간 값을 재생해도 통과하지 못한다.
  *
+ * <p><b>서명 대상은 바이트가 아니라 문자열이다.</b>
+ * {@code challengeId:nonce:deviceId} 를 UTF-8 로 인코딩한 바이트에 서명한다.
+ * ({@link AgentProtocol#challengeSigningPayload}) nonce 를 Base64 디코딩해서 쓰면 안 된다.
+ *
  * <p><b>공개키 표기</b> — Base64 로 저장하되 두 가지 표기를 모두 받는다.
  * <ul>
+ *   <li>원시 32바이트 — Agent 와 참조 구현이 쓰는 표기 (JWK OKP 의 {@code x})</li>
  *   <li>X.509 SubjectPublicKeyInfo (44바이트) — Java·OpenSSL 이 내보내는 표기</li>
- *   <li>원시 32바이트 — libsodium 계열이 내보내는 표기</li>
  * </ul>
- * Agent 구현이 어느 쪽을 쓰는지에 따라 등록이 통째로 막히는 것을 피하려고 둘 다 받는다.
+ * Agent 구현이 어느 쪽을 쓰는지에 따라 인증이 통째로 막히는 것을 피하려고 둘 다 받는다.
  * 원시 표기는 앞에 표준 헤더를 붙여 X.509 로 만든 뒤 처리한다.
  *
  * <p>관련 문서: 3.4.2 · LA-01 · WBS W1-06
@@ -40,20 +45,20 @@ public class AgentSignatureVerifier {
     private static final int RAW_KEY_LENGTH = 32;
 
     /**
-     * 도전값에 대한 서명이 이 공개키로 만들어졌는지 확인한다.
+     * 서명이 이 공개키로 만들어졌는지 확인한다.
      *
      * @param publicKeyBase64 {@code devices.public_key}
-     * @param challenge       서버가 보낸 도전값의 원본 바이트
+     * @param payload         서명 대상 문자열 ({@link AgentProtocol#challengeSigningPayload})
      * @param signatureBase64 Agent 가 보낸 서명
      * @return 검증에 성공하면 true. 형식 오류·검증 실패는 모두 false 다.
      */
-    public boolean verify(String publicKeyBase64, byte[] challenge, String signatureBase64) {
+    public boolean verify(String publicKeyBase64, String payload, String signatureBase64) {
         try {
             PublicKey publicKey = parsePublicKey(publicKeyBase64);
 
             Signature signature = Signature.getInstance(ALGORITHM);
             signature.initVerify(publicKey);
-            signature.update(challenge);
+            signature.update(payload.getBytes(StandardCharsets.UTF_8));
 
             return signature.verify(Base64.getDecoder().decode(signatureBase64));
 

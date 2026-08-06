@@ -127,8 +127,16 @@ public class PendingDispatchSweeper {
             return false;
         }
 
+        JsonNode parameters = parameters(task.get());
+        String payloadSha256 = AgentTaskPayloadHash.of(
+                objectMapper,
+                task.get().getPublicId(),
+                dispatch.getPublicId(),
+                task.get().getTaskType(),
+                parameters);
+
         publisher.send(WsTarget.DEVICE, dispatch.getDeviceId(),
-                AgentTaskFrame.of(task.get(), dispatch, parameters(task.get())));
+                AgentTaskFrame.of(task.get(), dispatch, parameters, payloadSha256));
         return true;
     }
 
