@@ -182,7 +182,7 @@ public class DevicePairingRequests extends TableImpl<DevicePairingRequestsRecord
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.IDX_PAIRING_PENDING_EXPIRES, Indexes.UK_PAIRING_ACTIVE_PER_USER);
+        return Arrays.asList(Indexes.IDX_PAIRING_CODE_HASH, Indexes.IDX_PAIRING_PENDING_EXPIRES, Indexes.UK_PAIRING_ACTIVE_PER_USER);
     }
 
     @Override

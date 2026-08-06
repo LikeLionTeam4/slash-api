@@ -90,6 +90,20 @@ slash:
   pairing:
     # 등록 코드 5분·1회용 (문서 DV-01)
     code-ttl: 5m
+    # 페어링 도전값. Agent 가 서명해 돌려줄 때까지만 산다. (메시지 스펙 §8.1)
+    session-ttl: 30s
+
+    # 등록 코드는 6자리라 경우의 수가 백만뿐이다. 5분이면 전부 시도해 볼 수 있어
+    # 해시 저장만으로는 막지 못한다. 실패 횟수 제한이 실제 방어선이다.
+    max-attempts: 10
+    attempt-window: 5m
+
+    # 세션 재발급 요청의 requestedAt 허용 오차. 벗어나면 재전송 공격으로 본다.
+    refresh-skew: 2m
+
+  agent:
+    # 페어링을 마친 Agent 에게 알려줄 WSS 주소. 환경마다 다르다.
+    ws-url: ${AGENT_WS_URL:ws://localhost:8080/ws/agent}
 
   websocket:
     # 사용자 WSS Ticket 30초·1회용 (문서 3.4.2)

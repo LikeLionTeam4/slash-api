@@ -2,6 +2,7 @@ package com.likelion.slash.ws;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.likelion.slash.common.Sha256;
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AgentDispatchStatus;
 import com.likelion.slash.common.enums.DeviceStatus;
@@ -14,15 +15,20 @@ import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import com.likelion.slash.ws.dto.ChallengeFrame;
 import com.likelion.slash.ws.dto.ProtocolErrorFrame;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -56,12 +62,12 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  * 인증 대상이 아니다. {@code /ws/**} 를 공개 경로로 열어 두고 프로토콜 안에서 검증한다.
  * 검증 전에는 소켓을 보관소에 넣지 않으므로, 인증되지 않은 연결로는 어떤 프레임도 나가지 않는다.
  *
+ * <p><b>두 겹으로 확인한다.</b> 접속 시점의 기기 Token(W1-02)과 연결마다 새로 받는 서명이다.
+ * Token 은 훔칠 수 있지만 개인키는 PC 밖으로 나오지 않고, 서명만으로는 Token 이 해지됐는지
+ * 알 수 없다. 둘 중 하나만으로는 부족해서 둘 다 본다.
+ *
  * <p><b>남은 것</b>
  * <ul>
- *   <li>기기 Token 검증 — 참조 구현은 접속 시 {@code Authorization: Bearer} 로 기기 Token 을
- *       먼저 확인하고 HELLO 의 deviceId 가 그것과 같은지 본다. 우리는 발급(W1-03)도
- *       저장할 열도 없어서 아직 서명 검증만으로 통과시킨다. 열이 생기면
- *       {@link #afterConnectionEstablished} 에서 확인하고 HELLO 에서 대조한다.</li>
  *   <li>RESULT_ACK — Agent 는 이것을 받아야 결과 캐시를 지운다. 못 받으면 재연결마다 과거
  *       결과를 다시 보낸다. 반영할 Task 상태가 W1-04 에서 정해지므로 그때 함께 붙인다.</li>
  *   <li>READY 의 {@code searchFolders}·{@code projectWorkspaces} — 저장할 표가 없다.
@@ -76,6 +82,8 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
 
     private static final String ATTR_STATE = "slash.state";
     private static final String ATTR_DEVICE_ID = "slash.deviceId";
+    /** 접속 Token 이 가리키는 기기. HELLO 의 deviceId 가 이것과 같아야 한다. */
+    private static final String ATTR_TOKEN_DEVICE_ID = "slash.tokenDeviceId";
     private static final String ATTR_DEVICE_PUBLIC_ID = "slash.devicePublicId";
     private static final String ATTR_CHALLENGE_ID = "slash.challengeId";
     private static final String ATTR_CHALLENGE_NONCE = "slash.challengeNonce";
@@ -89,6 +97,9 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private static final CloseStatus CLOSE_SUPERSEDED = new CloseStatus(4409, "CONNECTION_SUPERSEDED");
 
     private static final int NONCE_BYTES = 32;
+
+    private static final String BEARER_PREFIX = "Bearer ";
+    private static final String TOKEN_QUERY_PARAMETER = "deviceToken";
 
     private enum State {
         /** 접속 직후. HELLO 만 받는다. */
@@ -126,9 +137,54 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     // 연결 수명
     // ------------------------------------------------------------------
 
+    /**
+     * 접속 시점에 기기 Token 을 먼저 확인한다. (메시지 스펙 §8.1 · W1-02)
+     *
+     * <p>Token 이 없거나 만료됐으면 프레임을 한 번도 주고받지 않고 끊는다.
+     * 뒤이은 서명 검증은 <b>이 연결이 정말 그 기기인지</b>를 증명하는 별개의 단계다.
+     * Token 은 훔칠 수 있지만 개인키는 PC 밖으로 나오지 않으므로 둘을 함께 본다.
+     */
     @Override
-    public void afterConnectionEstablished(WebSocketSession session) {
+    public void afterConnectionEstablished(WebSocketSession session) throws IOException {
+        Optional<DevicesRecord> device = deviceToken(session)
+                .flatMap(token -> deviceRepository.findByActiveTokenHash(Sha256.hex(token), SlashTime.now()));
+
+        if (device.isEmpty()) {
+            fail(session, AgentProtocol.ERROR_AUTHENTICATION_FAILED, "invalid or missing device token", null, true);
+            return;
+        }
+
+        session.getAttributes().put(ATTR_TOKEN_DEVICE_ID, device.get().getId());
         session.getAttributes().put(ATTR_STATE, State.AWAITING_HELLO);
+    }
+
+    /**
+     * 접속 요청에서 기기 Token 을 꺼낸다.
+     *
+     * <p>헤더를 우선하고 질의 문자열도 받는다. 브라우저 WebSocket API 로는 헤더를 붙일 수 없어
+     * 참조 구현도 둘 다 받는다. 다만 <b>질의 문자열은 중간 경로의 접근 로그에 남는다.</b>
+     * Agent 는 헤더를 쓰는 것이 맞고, 질의 문자열은 시험·디버깅용으로 남겨 둔다.
+     */
+    private Optional<String> deviceToken(WebSocketSession session) {
+        List<String> authorization = session.getHandshakeHeaders().get(HttpHeaders.AUTHORIZATION);
+        if (authorization != null && !authorization.isEmpty()) {
+            String value = authorization.get(0);
+            if (value != null && value.startsWith(BEARER_PREFIX)) {
+                return Optional.of(value.substring(BEARER_PREFIX.length()).trim());
+            }
+        }
+
+        URI uri = session.getUri();
+        if (uri == null || uri.getQuery() == null) {
+            return Optional.empty();
+        }
+
+        return Arrays.stream(uri.getQuery().split("&"))
+                .filter(parameter -> parameter.startsWith(TOKEN_QUERY_PARAMETER + "="))
+                .map(parameter -> URLDecoder.decode(
+                        parameter.substring(TOKEN_QUERY_PARAMETER.length() + 1), StandardCharsets.UTF_8))
+                .filter(token -> !token.isBlank())
+                .findFirst();
     }
 
     @Override
@@ -209,6 +265,13 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
             // 없는 기기와 잘못된 형식을 구분해서 알리지 않는다. 식별자를 넣어 보며
             // 등록 여부를 알아내는 것을 막는다. (문서 DV-04)
             fail(session, AgentProtocol.ERROR_AUTHENTICATION_FAILED, "unknown device", eventId, true);
+            return;
+        }
+
+        // 접속에 쓴 Token 의 주인과 스스로 밝힌 기기가 다르다.
+        // Token 을 훔친 쪽이 남의 기기 행세를 하는 경우이므로 여기서 끊는다.
+        if (!device.get().getId().equals(session.getAttributes().get(ATTR_TOKEN_DEVICE_ID))) {
+            fail(session, AgentProtocol.ERROR_AUTHENTICATION_FAILED, "deviceId mismatch", eventId, true);
             return;
         }
         if (DeviceStatus.REVOKED.name().equals(device.get().getStatus())) {

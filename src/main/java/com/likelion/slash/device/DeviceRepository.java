@@ -123,6 +123,43 @@ public class DeviceRepository {
     }
 
     /**
+     * 이미 등록된 적 있는 PC 를 같은 주인이 다시 등록한다. (재등록)
+     *
+     * <p>{@code uk_devices_public_key} 때문에 같은 공개키로 행을 새로 만들 수 없다.
+     * 그 제약은 <b>남이 위장 등록하는 것</b>을 막기 위한 것이므로, 주인이 같다면 기존 행을
+     * 되살리는 것이 맞다. 이 경로가 없으면 연결을 해제한 PC 를 영영 다시 등록할 수 없다.
+     *
+     * <p>해제 상태를 풀고 보고된 정보를 갱신한다. {@code ck_devices_revoked_at} 이
+     * 상태와 해제 시각을 함께 요구하므로 두 열을 같이 되돌린다.
+     *
+     * <p>사용자가 일으킨 변경이므로 version 을 올린다. 낡은 화면이 이 기기를 덮어쓰지 못한다.
+     */
+    public Optional<DevicesRecord> reclaim(long deviceId,
+                                           long userId,
+                                           String name,
+                                           DeviceOs os,
+                                           DeviceArchitecture architecture,
+                                           String osVersion,
+                                           String agentVersion) {
+        return dsl.update(DEVICES)
+                .set(DEVICES.NAME, name)
+                .set(DEVICES.OS, os.name())
+                .set(DEVICES.ARCHITECTURE, architecture.name())
+                .set(DEVICES.OS_VERSION, osVersion)
+                .set(DEVICES.AGENT_VERSION, agentVersion)
+                .set(DEVICES.STATUS, DeviceStatus.OFFLINE.name())
+                .set(DEVICES.REVOKED_AT, (OffsetDateTime) null)
+                // 재등록 시점에는 아직 소유가 증명되지 않았다. 이전 Token 을 지워 둔다.
+                .set(DEVICES.DEVICE_TOKEN_HASH, (String) null)
+                .set(DEVICES.DEVICE_TOKEN_EXPIRES_AT, (OffsetDateTime) null)
+                .set(DEVICES.VERSION, DEVICES.VERSION.plus(1))
+                .where(DEVICES.ID.eq(deviceId))
+                .and(DEVICES.USER_ID.eq(userId))
+                .returning()
+                .fetchOptional();
+    }
+
+    /**
      * 기기 이름을 바꾼다. {@code If-Match} 로 받은 version 이 현재 값과 같을 때만 반영된다.
      *
      * @return 갱신된 기기. 비어 있으면 대상이 없거나 version 이 어긋난 것이다.
@@ -157,6 +194,41 @@ public class DeviceRepository {
                 .and(DEVICES.VERSION.eq(expectedVersion))
                 .and(DEVICES.STATUS.ne(DeviceStatus.REVOKED.name()))
                 .returning()
+                .fetchOptional();
+    }
+
+    // ------------------------------------------------------------------
+    // 기기 Token (W1-02)
+    // ------------------------------------------------------------------
+
+    /**
+     * 기기 Token 을 발급하거나 새것으로 바꾼다. 원문이 아니라 해시를 저장한다.
+     *
+     * <p>재발급하면 이전 Token 은 즉시 못 쓰게 된다. 열이 하나뿐이라 자연히 그렇게 된다.
+     * 훔친 Token 이 오래 살아 있지 않게 하는 편이 좋으므로 의도한 동작이다.
+     *
+     * <p>해제된 기기에는 발급하지 않는다. 발급하면 해제가 무력화된다.
+     */
+    public boolean issueToken(long deviceId, String tokenHash, OffsetDateTime expiresAt) {
+        return dsl.update(DEVICES)
+                .set(DEVICES.DEVICE_TOKEN_HASH, tokenHash)
+                .set(DEVICES.DEVICE_TOKEN_EXPIRES_AT, expiresAt)
+                .where(DEVICES.ID.eq(deviceId))
+                .and(DEVICES.STATUS.ne(DeviceStatus.REVOKED.name()))
+                .execute() == 1;
+    }
+
+    /**
+     * Token 해시로 기기를 찾는다. WSS 접속마다 부른다. ({@code uk_devices_token_hash})
+     *
+     * <p>만료된 Token 과 해제된 기기는 조회되지 않는다. 호출부가 상태를 다시 보지 않아도
+     * 되도록 조건을 여기에 모은다. 빠뜨리기 쉬운 확인이라 한곳에 둔다.
+     */
+    public Optional<DevicesRecord> findByActiveTokenHash(String tokenHash, OffsetDateTime now) {
+        return dsl.selectFrom(DEVICES)
+                .where(DEVICES.DEVICE_TOKEN_HASH.eq(tokenHash))
+                .and(DEVICES.DEVICE_TOKEN_EXPIRES_AT.gt(now))
+                .and(DEVICES.STATUS.ne(DeviceStatus.REVOKED.name()))
                 .fetchOptional();
     }
 
