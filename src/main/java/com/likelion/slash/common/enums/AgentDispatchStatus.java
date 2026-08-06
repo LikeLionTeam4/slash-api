@@ -23,5 +23,16 @@ public enum AgentDispatchStatus {
     FAILED,
 
     /** 전달 기한 만료 */
-    EXPIRED
+    EXPIRED;
+
+    /**
+     * 아직 끝나지 않은 전달인지 확인한다.
+     *
+     * <p>부분 UNIQUE 인덱스({@code uk_dispatch_active_task} · {@code uk_dispatch_active_device})가
+     * 한 건으로 제한하는 범위이자, ACK·RESULT 를 반영할 수 있는 범위다.
+     * 마감된 전달에 결과를 다시 쓰지 않는 판정에 쓴다.
+     */
+    public boolean isActive() {
+        return this == PENDING || this == DISPATCHED || this == ACKNOWLEDGED;
+    }
 }

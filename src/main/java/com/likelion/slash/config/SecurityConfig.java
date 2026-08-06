@@ -33,6 +33,10 @@ public class SecurityConfig {
             // 등록 코드와 Ed25519 서명으로 자체 검증한다.
             "/api/v1/agent/pair",
             "/api/v1/agent/pair/verify",
+            // WSS 는 접속 시점에 아직 누구인지 모른다. 인증을 프로토콜 안에서 처리한다.
+            // Agent 는 도전값 서명(3.4.2), 사용자는 30초·1회용 Ticket 으로 검증한다.
+            // 검증 전에는 소켓이 보관소에 등록되지 않아 어떤 프레임도 나가지 않는다.
+            "/ws/**",
     };
 
     @Bean
