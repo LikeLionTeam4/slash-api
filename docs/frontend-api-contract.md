@@ -278,23 +278,23 @@ PC 등록으로 발급되는 기기 Token(24시간)은 **로컬 Agent 전용**�
 | Cognito 도메인 (Hosted UI) | 로그인 | 최윤혁 |
 | 콜백 / 로그아웃 리다이렉트 URI | 로그인 | 프론트 → 등록 요청 |
 | WSS 주소 | 실시간 | 인프라 |
-| CORS 허용 오리진 (dev) | 전체 | 프론트 → 백엔드 설정 |
+| CORS 허용 오리진 (dev 배포) | 전체 | 인프라 → 백엔드 설정 |
 
 ### CORS
 
 현재 아래 오리진이 허용되어 있습니다.
 
-| 환경 | 허용 오리진 |
-|---|---|
-| 로컬 | `http://localhost:5173` (Vite 기본 포트) |
-| dev | `CORS_ALLOWED_ORIGINS` 환경 변수로 주입 — 아직 미정 |
+| 환경 | 허용 오리진 | 상태 |
+|---|---|---|
+| 로컬 | `http://localhost:5173` | 프론트 확정 |
+| dev | `CORS_ALLOWED_ORIGINS` 환경 변수로 주입 | 배포 도메인 미정 |
 
 허용되는 요청 헤더는 `Authorization` · `Content-Type` · `Idempotency-Key` · `If-Match` 이고,
 `ETag` 는 브라우저가 읽을 수 있도록 열어 두었습니다.
 쿠키를 쓰지 않으므로 `Access-Control-Allow-Credentials` 는 보내지 않습니다.
 
-**다른 포트를 쓰신다면 알려주세요.** 목록에 없는 오리진은 preflight 에서 403 으로 막힙니다.
-dev 배포 도메인(CloudFront)도 정해지면 알려주세요.
+목록에 없는 오리진은 preflight 에서 403 으로 막힙니다.
+포트를 바꾸시거나 dev 배포 도메인(CloudFront)이 정해지면 알려주세요.
 
 ---
 
