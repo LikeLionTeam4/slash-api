@@ -1,0 +1,20 @@
+{
+  "name": "slash-api-agent-test",
+  "private": true,
+  "version": "0.0.0",
+  "description": "임시 시험용 — 실제 로컬 에이전트(slash-agent)와의 통신 확인용 mock-api. main에 머지하지 않는다.",
+  "workspaces": [
+    "contracts",
+    "mock-nlu",
+    "mock-llm",
+    "mock-api"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "start": "tsx mock-api/src/server.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
