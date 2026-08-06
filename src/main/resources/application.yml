@@ -94,3 +94,18 @@ slash:
   websocket:
     # 사용자 WSS Ticket 30초·1회용 (문서 3.4.2)
     ticket-ttl: 30s
+
+  dispatch:
+    # 미전달 작업 재발행 스윕. (docs/w1-06-wss-routing.md 5.4)
+    #
+    # Pod 간 전달에 쓰는 Valkey Pub/Sub 은 전달을 보장하지 않는다.
+    # 대상 Pod 이 재시작 중이면 메시지가 사라지고 전달은 PENDING 으로 남는데,
+    # 그것을 다시 발행하는 그물이다. 주 경로는 Agent 재연결 시 재전송이다.
+    resend:
+      # @Scheduled 의 문자열 값은 30s 같은 표기를 해석하지 못해 여기만 밀리초로 적는다.
+      interval-ms: 5000
+      # 발행된 지 이만큼 지나도 PENDING 이면 유실로 본다.
+      # 방금 발행한 전달을 곧바로 다시 보내지 않기 위한 여유이기도 하다.
+      stale-after: 5s
+      # 한 회차에서 처리할 최대 건수. 밀린 양이 많아도 한 회차를 길게 잡지 않는다.
+      batch-size: 100

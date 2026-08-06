@@ -6,8 +6,11 @@ import static com.likelion.slash.support.TestFixtures.준비된_기기;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import static com.likelion.slash.jooq.Tables.AGENT_DISPATCHES;
+
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AgentDispatchStatus;
+import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.error.ErrorCode;
 import org.jooq.DSLContext;
@@ -159,5 +162,77 @@ class AgentDispatchRepositoryTest {
         assertThat(만료된_전달.getStatus()).isEqualTo(AgentDispatchStatus.EXPIRED.name());
         assertThat(만료된_전달.getCompletedAt()).isNotNull();
         assertThat(agentDispatchRepository.findActiveByDeviceId(deviceId)).isEmpty();
+    }
+
+    // ------------------------------------------------------------------
+    // 스윕 재발행 대상 (WBS W1-06 · docs/w1-06-wss-routing.md 5.4)
+    //
+    //   Pub/Sub 이 유실했거나 대상 Pod 이 재시작 중이어서 아무도 내보내지 못한 전달만
+    //   다시 발행해야 한다. 조건이 하나라도 헐거우면 같은 작업이 여러 번 실행된다.
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("아무도 내보내지 못한 전달을 재발행 대상으로 찾는다")
+    void 미전달을_찾는다() {
+        var dispatch = 오래된_미전달_전달();
+
+        assertThat(agentDispatchRepository.findPendingForResend(SlashTime.now(), SlashTime.now(), 100))
+                .extracting(record -> record.getId())
+                .contains(dispatch.getId());
+    }
+
+    @Test
+    @DisplayName("이미 소켓으로 나간 전달은 재발행하지 않는다")
+    void 전송된_전달은_제외한다() {
+        var dispatch = 오래된_미전달_전달();
+        agentDispatchRepository.markDispatched(dispatch.getId());
+
+        assertThat(agentDispatchRepository.findPendingForResend(SlashTime.now(), SlashTime.now(), 100))
+                .extracting(record -> record.getId())
+                .doesNotContain(dispatch.getId());
+    }
+
+    @Test
+    @DisplayName("방금 만든 전달은 재발행하지 않는다 — 최초 발행과 겹치면 두 번 실행된다")
+    void 방금_만든_전달은_제외한다() {
+        long userId = 사용자(dsl);
+        long deviceId = 준비된_기기(dsl, userId);
+        long taskId = 작업(dsl, userId, deviceId, TaskStatus.QUEUED.name());
+        var dispatch = agentDispatchRepository.create(taskId, deviceId, SlashTime.now().plusMinutes(5));
+
+        assertThat(agentDispatchRepository.findPendingForResend(
+                SlashTime.now().minusSeconds(5), SlashTime.now(), 100))
+                .extracting(record -> record.getId())
+                .doesNotContain(dispatch.getId());
+    }
+
+    @Test
+    @DisplayName("기한이 지난 전달은 재발행하지 않는다 — 보내도 Agent 가 거부한다")
+    void 만료된_전달은_제외한다() {
+        long userId = 사용자(dsl);
+        long deviceId = 준비된_기기(dsl, userId);
+        long taskId = 작업(dsl, userId, deviceId, TaskStatus.QUEUED.name());
+        var dispatch = agentDispatchRepository.create(taskId, deviceId, SlashTime.now().plusSeconds(1));
+
+        assertThat(agentDispatchRepository.findPendingForResend(
+                SlashTime.now(), SlashTime.now().plusMinutes(1), 100))
+                .extracting(record -> record.getId())
+                .doesNotContain(dispatch.getId());
+    }
+
+    /** 만들어진 지 시간이 지났는데도 아직 PENDING 인 전달. */
+    private AgentDispatchesRecord 오래된_미전달_전달() {
+        long userId = 사용자(dsl);
+        long deviceId = 준비된_기기(dsl, userId);
+        long taskId = 작업(dsl, userId, deviceId, TaskStatus.QUEUED.name());
+        var dispatch = agentDispatchRepository.create(taskId, deviceId, SlashTime.now().plusMinutes(5));
+
+        // created_at 은 DB 기본값이라 과거로 만들려면 직접 내려야 한다.
+        dsl.update(AGENT_DISPATCHES)
+                .set(AGENT_DISPATCHES.CREATED_AT, SlashTime.now().minusMinutes(1))
+                .where(AGENT_DISPATCHES.ID.eq(dispatch.getId()))
+                .execute();
+
+        return dispatch;
     }
 }
