@@ -1,5 +1,6 @@
 package com.likelion.slash.pairing;
 
+import com.likelion.slash.common.ClientAddressResolver;
 import com.likelion.slash.common.response.ApiResponse;
 import com.likelion.slash.pairing.dto.AgentPairRequest;
 import com.likelion.slash.pairing.dto.AgentPairResponse;
@@ -29,9 +30,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class AgentPairingController {
 
     private final PairingService pairingService;
+    private final ClientAddressResolver clientAddressResolver;
 
-    public AgentPairingController(PairingService pairingService) {
+    public AgentPairingController(PairingService pairingService,
+                                  ClientAddressResolver clientAddressResolver) {
         this.pairingService = pairingService;
+        this.clientAddressResolver = clientAddressResolver;
     }
 
     /** 등록 코드를 제출하고 도전값을 받는다. 아직 Token 은 나오지 않는다. */
@@ -60,16 +64,11 @@ public class AgentPairingController {
     /**
      * 시도 횟수를 세는 기준.
      *
-     * <p>Ingress 뒤에 있으면 {@code getRemoteAddr()} 가 전부 같은 주소로 보인다.
-     * 그 경우 한 사람의 실패가 모두를 막으므로 {@code X-Forwarded-For} 의 첫 주소를 쓴다.
-     * 이 헤더는 클라이언트가 위조할 수 있지만, 위조하면 자기 한도를 늘릴 뿐 남을 막지는 못한다.
-     * 정확한 차단이 아니라 무차별 대입 속도를 늦추는 것이 목적이라 이 정도로 충분하다.
+     * <p>{@code X-Forwarded-For} 를 어디까지 믿을지는 배포 구성에 달려 있어
+     * {@link ClientAddressResolver} 가 정한다. 여기서 헤더를 직접 읽지 않는다 —
+     * 첫 값을 그냥 믿으면 요청마다 다른 값을 넣어 시도 횟수 제한을 통째로 지울 수 있다.
      */
-    private static String clientOf(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+    private String clientOf(HttpServletRequest request) {
+        return clientAddressResolver.resolve(request);
     }
 }

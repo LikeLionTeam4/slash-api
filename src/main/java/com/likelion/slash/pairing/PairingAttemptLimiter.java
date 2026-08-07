@@ -19,6 +19,21 @@ import org.springframework.stereotype.Component;
  *
  * <p>막는 기준은 <b>실패</b> 횟수다. 성공한 등록까지 세면 PC 를 여러 대 등록하는
  * 정상 사용자가 막힌다.
+ *
+ * <p><b>두 겹으로 센다.</b>
+ * <ul>
+ *   <li>호출자별 — 한 곳에서 반복해 찌르는 것을 막는다. 판정 기준은
+ *       {@link com.likelion.slash.common.ClientAddressResolver} 다</li>
+ *   <li>서비스 전체 — 주소를 바꿔 가며 찌르는 것을 막는다</li>
+ * </ul>
+ *
+ * <p>호출자별 제한만 두면 주소를 바꿀 수 있는 공격자에게는 없는 것과 같다.
+ * 전체 제한은 그걸 받치는 마지막 그물이라 한도를 넉넉히 잡는다 — 평상시 실패는 사용자가
+ * 코드를 잘못 옮겨 적는 정도라 몇 건에 그친다. 한도에 닿았다는 것 자체가 공격 신호다.
+ *
+ * <p>대신 전체 제한이 걸리면 그동안 <b>정상 등록도 함께 막힌다.</b> 공격자가 일부러
+ * 한도를 채워 등록을 막을 수 있다는 뜻이다. 등록이 몇 분 늦는 쪽이 남의 계정에 PC 가
+ * 붙는 쪽보다 낫다고 보고 받아들인 절충이다. {@code global-max-attempts} 로 조절한다.
  */
 @Component
 public class PairingAttemptLimiter {
@@ -27,23 +42,38 @@ public class PairingAttemptLimiter {
 
     private static final String KEY_PREFIX = "pairing:attempt:";
 
+    /** 서비스 전체 실패를 모으는 자리. 호출자 주소가 들어가는 자리와 겹치지 않는 이름이다. */
+    private static final String GLOBAL_KEY = KEY_PREFIX + "@global";
+
     private final StringRedisTemplate redis;
     private final int maxAttempts;
+    private final int globalMaxAttempts;
     private final Duration window;
 
     public PairingAttemptLimiter(StringRedisTemplate redis,
                                  @Value("${slash.pairing.max-attempts}") int maxAttempts,
+                                 @Value("${slash.pairing.global-max-attempts}") int globalMaxAttempts,
                                  @Value("${slash.pairing.attempt-window}") Duration window) {
         this.redis = redis;
         this.maxAttempts = maxAttempts;
+        this.globalMaxAttempts = globalMaxAttempts;
         this.window = window;
     }
 
     /** 한도를 넘었는지. 넘었으면 코드를 대조하지 않고 거절한다. */
     public boolean isBlocked(String client) {
         try {
-            String count = redis.opsForValue().get(key(client));
-            return count != null && Integer.parseInt(count) >= maxAttempts;
+            if (countOf(key(client)) >= maxAttempts) {
+                return true;
+            }
+
+            if (countOf(GLOBAL_KEY) >= globalMaxAttempts) {
+                // 주소를 바꿔 가며 찌르고 있다는 뜻이다. 조사할 수 있도록 남긴다.
+                log.warn("페어링 실패가 서비스 전체 한도에 닿았습니다. 무차별 대입일 수 있습니다.");
+                return true;
+            }
+
+            return false;
 
         } catch (Exception e) {
             // Valkey 가 끊겼다고 등록 자체를 막지는 않는다.
@@ -56,21 +86,36 @@ public class PairingAttemptLimiter {
     /** 코드가 틀렸다. 창(window)은 첫 실패를 기준으로 시작한다. */
     public void recordFailure(String client) {
         try {
-            Long count = redis.opsForValue().increment(key(client));
-            if (count != null && count == 1L) {
-                redis.expire(key(client), window);
-            }
+            increment(key(client));
+            increment(GLOBAL_KEY);
         } catch (Exception e) {
             log.warn("페어링 실패를 기록하지 못했습니다: {}", e.getMessage());
         }
     }
 
-    /** 등록에 성공했으니 기록을 지운다. */
+    /**
+     * 등록에 성공했으니 이 호출자의 기록을 지운다.
+     *
+     * <p>전체 집계는 지우지 않는다. 공격자가 코드 하나만 맞혀도 그때까지 쌓인 실패가
+     * 사라지면 전체 제한이 의미를 잃는다.
+     */
     public void reset(String client) {
         try {
             redis.delete(key(client));
         } catch (Exception e) {
             log.warn("페어링 시도 기록을 지우지 못했습니다: {}", e.getMessage());
+        }
+    }
+
+    private long countOf(String key) {
+        String count = redis.opsForValue().get(key);
+        return count == null ? 0L : Long.parseLong(count);
+    }
+
+    private void increment(String key) {
+        Long count = redis.opsForValue().increment(key);
+        if (count != null && count == 1L) {
+            redis.expire(key, window);
         }
     }
 
