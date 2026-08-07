@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.likelion.slash.common.Sha256;
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AgentDispatchStatus;
 import com.likelion.slash.common.enums.DeviceStatus;
@@ -40,6 +41,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -60,6 +62,7 @@ class AgentWebSocketHandlerTest {
 
     private static final long 기기_PK = 42L;
     private static final UUID 기기_공개ID = UUID.randomUUID();
+    private static final String 기기_TOKEN = "device-token-값";
     private static final int RAW_KEY_LENGTH = 32;
 
     /**
@@ -104,9 +107,55 @@ class AgentWebSocketHandlerTest {
 
         when(deviceRepository.findByPublicId(기기_공개ID)).thenReturn(Optional.of(device));
         when(deviceRepository.findById(기기_PK)).thenReturn(Optional.of(device));
+        when(deviceRepository.findByActiveTokenHash(eq(Sha256.hex(기기_TOKEN)), any()))
+                .thenReturn(Optional.of(device));
 
         session = 세션();
         handler.afterConnectionEstablished(session);
+    }
+
+    // ------------------------------------------------------------------
+    // 접속 자격 (W1-02 기기 Token)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("기기 Token 없이 접속하면 프레임을 주고받기 전에 끊는다")
+    void 토큰_없이는_접속하지_못한다() throws Exception {
+        WebSocketSession 무자격 = 세션(null);
+
+        handler.afterConnectionEstablished(무자격);
+
+        ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
+        verify(무자격).sendMessage(captor.capture());
+        assertThat(objectMapper.readTree(captor.getValue().getPayload()).path("code").asText())
+                .isEqualTo("AUTHENTICATION_FAILED");
+        verify(무자격).close(종료코드(4400));
+    }
+
+    @Test
+    @DisplayName("만료됐거나 없는 Token 으로 접속하면 끊는다")
+    void 모르는_토큰은_거부한다() throws Exception {
+        WebSocketSession 남의_토큰 = 세션("모르는-토큰");
+
+        handler.afterConnectionEstablished(남의_토큰);
+
+        verify(남의_토큰).close(종료코드(4400));
+    }
+
+    @Test
+    @DisplayName("Token 의 주인과 다른 deviceId 를 밝히면 끊는다")
+    void 토큰과_다른_기기는_거부한다() throws Exception {
+        UUID 남의_기기_공개ID = UUID.randomUUID();
+        DevicesRecord 남의_기기 = new DevicesRecord();
+        남의_기기.setId(999L);
+        남의_기기.setPublicId(남의_기기_공개ID);
+        남의_기기.setStatus(DeviceStatus.OFFLINE.name());
+        when(deviceRepository.findByPublicId(남의_기기_공개ID)).thenReturn(Optional.of(남의_기기));
+
+        보낸다(프레임("HELLO", "\"deviceId\":\"" + 남의_기기_공개ID + "\""));
+
+        assertThat(오류코드()).isEqualTo("AUTHENTICATION_FAILED");
+        assertThat(registry.holds(WsTarget.DEVICE, 999L)).isFalse();
     }
 
     // ------------------------------------------------------------------
@@ -495,12 +544,24 @@ class AgentWebSocketHandlerTest {
         return argThat(status -> status != null && status.getCode() == code);
     }
 
+    /** 유효한 기기 Token 으로 접속한 연결. */
     private static WebSocketSession 세션() {
+        return 세션(기기_TOKEN);
+    }
+
+    private static WebSocketSession 세션(String token) {
         WebSocketSession session = mock(WebSocketSession.class);
         Map<String, Object> attributes = new HashMap<>();
         when(session.getId()).thenReturn(UUID.randomUUID().toString());
         when(session.isOpen()).thenReturn(true);
         when(session.getAttributes()).thenReturn(attributes);
+
+        HttpHeaders headers = new HttpHeaders();
+        if (token != null) {
+            headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+        }
+        when(session.getHandshakeHeaders()).thenReturn(headers);
+
         return session;
     }
 }

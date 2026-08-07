@@ -19,7 +19,39 @@ slash-api 를 호출할 때 지켜야 하는 공통 규약입니다.
 |---|---|
 | 동작 중 | `GET /api/v1/health/dependencies` |
 | 동작 중 | `GET /api/v1/me` |
+| **동작 중** | `POST /api/v1/pairing-requests` — PC 등록 코드 발급 |
+| **동작 중** | `GET /api/v1/pairing-requests/{id}` — 등록 진행 상태 |
 | 계약만 확정 | 기기 API (W1-03), 작업 API (W1-04) |
+
+### PC 등록 화면 (W1-02)
+
+```
+POST /api/v1/pairing-requests            → 201
+{ "data": { "pairingRequestId": "…", "pairingCode": "900823",
+            "expiresAt": "2026-08-06T15:35:11+09:00" } }
+
+GET  /api/v1/pairing-requests/{id}       → 200
+{ "data": { "status": "PENDING", "deviceId": null } }
+{ "data": { "status": "CLAIMED", "deviceId": "e0d68b9f-…" } }
+```
+
+화면 흐름은 이렇습니다.
+
+1. "PC 등록" 을 누르면 코드를 발급받아 **6자리를 크게 보여줍니다.** 사용자가 그 값을 자기 PC 의
+   Agent 에 입력합니다.
+2. 발급 응답의 `expiresAt` 까지 남은 시간을 함께 보여주세요. **5분**입니다.
+3. 그동안 `GET` 으로 상태를 조회해 `CLAIMED` 로 바뀌면 등록 완료로 처리합니다.
+   (2~3초 간격이면 충분합니다)
+
+> **`pairingCode` 는 발급 응답에서 딱 한 번만 나옵니다.** 서버는 해시만 저장해서 다시 알려줄 수
+> 없습니다. 화면을 벗어나면 새로 발급받아야 하니, 그 전에 이탈하지 않도록 안내해 주세요.
+
+> 코드는 **사용자당 한 개**만 살아 있습니다. 새로 발급하면 이전 코드는 즉시 무효가 됩니다.
+> 사용자가 등록 화면을 두 번 열면 먼저 연 쪽의 코드가 죽으니, 화면을 다시 열 때 코드를
+> 자동 재발급하기보다 "코드 다시 받기" 버튼으로 두는 편이 안전합니다.
+
+> Agent 가 호출하는 `POST /api/v1/agent/pair`·`/pair/verify`·`/sessions/refresh` 는
+> 프론트가 부를 일이 없습니다. 사용자 인증 없이 Ed25519 서명으로 동작하는 별도 경로입니다.
 
 **Cognito 값이 아직 없어도 로컬에서는 로그인 이후 화면을 개발할 수 있습니다.**
 [5.1 로컬 개발용 임시 인증](#51-로컬-개발용-임시-인증)을 보세요.
