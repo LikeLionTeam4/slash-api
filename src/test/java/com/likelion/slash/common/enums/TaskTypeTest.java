@@ -86,4 +86,37 @@ class TaskTypeTest {
         assertThat(TaskType.TEXT_SUMMARY.requiredParameters()).containsExactly("text");
         assertThat(TaskType.AI_AGENT_USAGE.requiredParameters()).containsExactly("provider");
     }
+
+    @Test
+    @DisplayName("서버가 채우는 입력값은 NLU 몫에서 빠진다")
+    void 서버가_채우는_값은_nlu_몫이_아니다() {
+        // searchFolderId 는 Agent 의 READY.searchFolders 에서 서버가 고른다.
+        // NLU 가 이것까지 채우려 하면 자연어에 없는 값이라 매번 되묻게 된다.
+        // (slash-nlu docs/BACKEND_CONTRACT.md · 소유권)
+        assertThat(TaskType.FILE_SEARCH.backendProvidedParameters()).containsExactly("searchFolderId");
+        assertThat(TaskType.FILE_SEARCH.nluRequiredParameters()).containsExactly("query");
+
+        assertThat(TaskType.CODE_ANALYSIS.backendProvidedParameters()).containsExactly("workspaceId");
+        assertThat(TaskType.CODE_ANALYSIS.nluRequiredParameters()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("나머지 작업은 NLU 가 필수 입력값을 모두 채운다")
+    void 나머지는_nlu_가_모두_채운다() {
+        assertThat(TaskType.WEATHER_LOOKUP.nluRequiredParameters()).containsExactly("location");
+        assertThat(TaskType.SYSTEM_STATUS.nluRequiredParameters()).isEmpty();
+        assertThat(TaskType.TEXT_SUMMARY.nluRequiredParameters()).containsExactly("text");
+        assertThat(TaskType.AI_AGENT_USAGE.nluRequiredParameters()).containsExactly("provider");
+    }
+
+    @Test
+    @DisplayName("서버가 채우는 값은 반드시 필수 입력값 안에 있다")
+    void 서버가_채우는_값은_필수_입력값의_부분집합이다() {
+        // 오타로 필수 목록에 없는 이름을 적으면 그 값은 아무도 채우지 않는 채로 남는다.
+        for (TaskType taskType : TaskType.values()) {
+            assertThat(taskType.requiredParameters())
+                    .as("%s 의 backendProvidedParameters", taskType.name())
+                    .containsAll(taskType.backendProvidedParameters());
+        }
+    }
 }
