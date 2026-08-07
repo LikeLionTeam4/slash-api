@@ -18,32 +18,41 @@ public enum TaskType {
             "/weather",
             ProcessingRoute.BACKEND_SERVICE,
             Priority.P0,
-            List.of("location")),
+            List.of("location"),
+            List.of()),
 
     FILE_SEARCH(
             "/file",
             ProcessingRoute.LOCAL_AGENT,
             Priority.P0,
-            List.of("query", "searchFolderId")),
+            List.of("query", "searchFolderId"),
+            // searchFolderId 는 Agent 가 READY 로 보고한 searchFolders 중에서 서버가 고른다.
+            // NLU 는 이 값을 반환하지도, 누락값으로 보고하지도 않는다.
+            // (slash-nlu docs/BACKEND_CONTRACT.md · 소유권)
+            List.of("searchFolderId")),
 
     SYSTEM_STATUS(
             "/status",
             ProcessingRoute.LOCAL_AGENT,
             Priority.P0,
             // metrics 는 생략 시 전체(CPU·MEMORY·DISK)를 조회한다.
+            List.of(),
             List.of()),
 
     TEXT_SUMMARY(
             "/summary",
             ProcessingRoute.LLM_SERVICE,
             Priority.P0,
-            List.of("text")),
+            List.of("text"),
+            List.of()),
 
     /** 조건부 P1. 등록한 프로젝트 작업 폴더를 읽기 전용으로 분석한다. */
     CODE_ANALYSIS(
             "/code",
             ProcessingRoute.LOCAL_AGENT,
             Priority.P1,
+            List.of("workspaceId"),
+            // 작업 폴더도 사용자가 미리 등록한 목록에서 서버가 고른다. searchFolderId 와 같은 이유다.
             List.of("workspaceId")),
 
     /** P1. Claude·Codex SDK 의 사용량 조회. 자체 호스팅 Gemma 추론량과 무관하다. */
@@ -51,7 +60,8 @@ public enum TaskType {
             "/usage",
             ProcessingRoute.LOCAL_AGENT,
             Priority.P1,
-            List.of("provider"));
+            List.of("provider"),
+            List.of());
 
     public enum Priority { P0, P1 }
 
@@ -59,15 +69,18 @@ public enum TaskType {
     private final ProcessingRoute processingRoute;
     private final Priority priority;
     private final List<String> requiredParameters;
+    private final List<String> backendProvidedParameters;
 
     TaskType(String slashCommand,
              ProcessingRoute processingRoute,
              Priority priority,
-             List<String> requiredParameters) {
+             List<String> requiredParameters,
+             List<String> backendProvidedParameters) {
         this.slashCommand = slashCommand;
         this.processingRoute = processingRoute;
         this.priority = priority;
         this.requiredParameters = requiredParameters;
+        this.backendProvidedParameters = backendProvidedParameters;
     }
 
     public String slashCommand() {
@@ -82,8 +95,31 @@ public enum TaskType {
         return priority;
     }
 
+    /** 작업을 실행하는 데 필요한 입력값 전체. 누가 채우는지는 구분하지 않는다. */
     public List<String> requiredParameters() {
         return requiredParameters;
+    }
+
+    /**
+     * 필수 입력값 중 서버가 채우는 것.
+     *
+     * <p>사용자가 미리 등록해 둔 목록(검색 폴더·작업 폴더)에서 고르는 값이라
+     * 자연어에서 뽑아낼 수 없다. NLU 는 이 값을 반환하지 않는다.
+     */
+    public List<String> backendProvidedParameters() {
+        return backendProvidedParameters;
+    }
+
+    /**
+     * 필수 입력값 중 NLU 가 채워야 하는 것.
+     *
+     * <p>NLU 응답을 검증할 때 기준이 되는 목록이다. 여기 없는 값이 비어 있다고 해서
+     * {@code NEEDS_CLARIFICATION} 으로 되물으면 안 된다. 서버가 채울 값이기 때문이다.
+     */
+    public List<String> nluRequiredParameters() {
+        return requiredParameters.stream()
+                .filter(parameter -> !backendProvidedParameters.contains(parameter))
+                .toList();
     }
 
     /** 실행 대상 PC 선택이 필요한 작업인지 확인한다. */
