@@ -144,6 +144,18 @@ public class Devices extends TableImpl<DevicesRecord> {
      */
     public final TableField<DevicesRecord, OffsetDateTime> UPDATED_AT = createField(DSL.name("updated_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6).nullable(false).defaultValue(DSL.field(DSL.raw("now()"), SQLDataType.TIMESTAMPWITHTIMEZONE)), this, "");
 
+    /**
+     * The column <code>public.devices.device_token_hash</code>. 기기 Token 의
+     * SHA-256(hex). 원문은 어떤 경우에도 저장하지 않는다.
+     */
+    public final TableField<DevicesRecord, String> DEVICE_TOKEN_HASH = createField(DSL.name("device_token_hash"), SQLDataType.VARCHAR(64), this, "기기 Token 의 SHA-256(hex). 원문은 어떤 경우에도 저장하지 않는다.");
+
+    /**
+     * The column <code>public.devices.device_token_expires_at</code>. 기기 Token
+     * 만료 시각. 재발급은 POST /api/v1/agent/sessions/refresh 가 처리한다.
+     */
+    public final TableField<DevicesRecord, OffsetDateTime> DEVICE_TOKEN_EXPIRES_AT = createField(DSL.name("device_token_expires_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "기기 Token 만료 시각. 재발급은 POST /api/v1/agent/sessions/refresh 가 처리한다.");
+
     private Devices(Name alias, Table<DevicesRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
@@ -213,7 +225,7 @@ public class Devices extends TableImpl<DevicesRecord> {
 
     @Override
     public List<Index> getIndexes() {
-        return Arrays.asList(Indexes.IDX_DEVICES_USER_STATUS);
+        return Arrays.asList(Indexes.IDX_DEVICES_USER_STATUS, Indexes.UK_DEVICES_TOKEN_HASH);
     }
 
     @Override
@@ -305,7 +317,8 @@ public class Devices extends TableImpl<DevicesRecord> {
             Internal.createCheck(this, DSL.name("ck_devices_architecture"), "(((architecture)::text = ANY ((ARRAY['X86_64'::character varying, 'ARM64'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_devices_os"), "(((os)::text = ANY ((ARRAY['WINDOWS'::character varying, 'MACOS'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_devices_revoked_at"), "((((status)::text = 'REVOKED'::text) = (revoked_at IS NOT NULL)))", true),
-            Internal.createCheck(this, DSL.name("ck_devices_status"), "(((status)::text = ANY ((ARRAY['ONLINE'::character varying, 'READY'::character varying, 'BUSY'::character varying, 'OFFLINE'::character varying, 'REVOKED'::character varying])::text[])))", true)
+            Internal.createCheck(this, DSL.name("ck_devices_status"), "(((status)::text = ANY ((ARRAY['ONLINE'::character varying, 'READY'::character varying, 'BUSY'::character varying, 'OFFLINE'::character varying, 'REVOKED'::character varying])::text[])))", true),
+            Internal.createCheck(this, DSL.name("ck_devices_token_pair"), "(((device_token_hash IS NULL) = (device_token_expires_at IS NULL)))", true)
         );
     }
 
