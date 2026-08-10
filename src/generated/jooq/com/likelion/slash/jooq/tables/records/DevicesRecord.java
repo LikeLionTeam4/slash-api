@@ -250,6 +250,40 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
         return (OffsetDateTime) get(14);
     }
 
+    /**
+     * Setter for <code>public.devices.device_token_hash</code>. 기기 Token 의
+     * SHA-256(hex). 원문은 어떤 경우에도 저장하지 않는다.
+     */
+    public DevicesRecord setDeviceTokenHash(String value) {
+        set(15, value);
+        return this;
+    }
+
+    /**
+     * Getter for <code>public.devices.device_token_hash</code>. 기기 Token 의
+     * SHA-256(hex). 원문은 어떤 경우에도 저장하지 않는다.
+     */
+    public String getDeviceTokenHash() {
+        return (String) get(15);
+    }
+
+    /**
+     * Setter for <code>public.devices.device_token_expires_at</code>. 기기 Token
+     * 만료 시각. 재발급은 POST /api/v1/agent/sessions/refresh 가 처리한다.
+     */
+    public DevicesRecord setDeviceTokenExpiresAt(OffsetDateTime value) {
+        set(16, value);
+        return this;
+    }
+
+    /**
+     * Getter for <code>public.devices.device_token_expires_at</code>. 기기 Token
+     * 만료 시각. 재발급은 POST /api/v1/agent/sessions/refresh 가 처리한다.
+     */
+    public OffsetDateTime getDeviceTokenExpiresAt() {
+        return (OffsetDateTime) get(16);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -273,7 +307,7 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
     /**
      * Create a detached, initialised DevicesRecord
      */
-    public DevicesRecord(Long id, UUID publicId, Long userId, String name, String publicKey, String os, String architecture, String osVersion, String agentVersion, String status, OffsetDateTime lastSeenAt, OffsetDateTime revokedAt, Integer version, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+    public DevicesRecord(Long id, UUID publicId, Long userId, String name, String publicKey, String os, String architecture, String osVersion, String agentVersion, String status, OffsetDateTime lastSeenAt, OffsetDateTime revokedAt, Integer version, OffsetDateTime createdAt, OffsetDateTime updatedAt, String deviceTokenHash, OffsetDateTime deviceTokenExpiresAt) {
         super(Devices.DEVICES);
 
         setId(id);
@@ -291,6 +325,8 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
         setVersion(version);
         setCreatedAt(createdAt);
         setUpdatedAt(updatedAt);
+        setDeviceTokenHash(deviceTokenHash);
+        setDeviceTokenExpiresAt(deviceTokenExpiresAt);
         resetChangedOnNotNull();
     }
 }
