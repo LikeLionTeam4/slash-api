@@ -127,6 +127,13 @@ slash:
     ticket-ttl: 30s
 
   dispatch:
+    # 전달 기한. Agent 는 이 시각이 지난 TASK 를 실행하지 않는다. (메시지 스펙 §5)
+    #
+    # 기기가 켜져 있는 것을 확인한 뒤에만 전달을 만들기 때문에 짧아도 된다.
+    # 꺼져 있는 동안 접수된 작업은 전달 없이 WAITING_FOR_DEVICE 로 기다리다가,
+    # Agent 가 READY 를 보고할 때 그 시점 기준으로 기한을 새로 받는다.
+    ttl: 60s
+
     # 미전달 작업 재발행 스윕. (docs/w1-06-wss-routing.md 5.4)
     #
     # Pod 간 전달에 쓰는 Valkey Pub/Sub 은 전달을 보장하지 않는다.
