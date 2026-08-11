@@ -1,5 +1,7 @@
 package com.likelion.slash.common.error;
 
+import java.util.EnumSet;
+import java.util.Set;
 import org.springframework.http.HttpStatus;
 
 /**
@@ -94,6 +96,16 @@ public enum ErrorCode {
     /** 경로·권한·보안 정책 위반 */
     POLICY_DENIED(HttpStatus.FORBIDDEN, "허용되지 않은 경로 또는 작업입니다."),
 
+    /**
+     * Agent 가 작업 자체를 받지 않음. ({@code ACK.accepted=false} 인데 사유가 없거나 모르는 값)
+     *
+     * <p>이름은 참조 구현({@code mock-api/src/taskOrchestrator.ts})의 fallback 을 그대로 따른다.
+     */
+    AGENT_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "PC가 작업을 받지 않았습니다."),
+
+    /** Agent 가 실행에 실패했는데 사유가 없거나 모르는 값. (참조 구현의 fallback) */
+    AGENT_TASK_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "PC에서 작업을 끝내지 못했습니다."),
+
     // ---------------------------------------------------------------------
     // 외부·내부 서비스
     // ---------------------------------------------------------------------
@@ -117,6 +129,17 @@ public enum ErrorCode {
     /** 분류되지 않은 내부 오류 */
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "처리 중 문제가 발생했습니다.");
 
+    /** Agent 가 보고할 수 있는 사유. 계약({@code contracts/src/enums.ts})의 {@code REASON_CODES} 와 같다. */
+    private static final Set<ErrorCode> AGENT_REPORTABLE = EnumSet.of(
+            DEVICE_BUSY,
+            TASK_TYPE_NOT_SUPPORTED,
+            INVALID_PARAMETERS,
+            SEARCH_FOLDER_NOT_FOUND,
+            WORKSPACE_NOT_FOUND,
+            CODE_AGENT_NOT_CONFIGURED,
+            TASK_EXPIRED,
+            POLICY_DENIED);
+
     private final HttpStatus httpStatus;
     private final String defaultMessage;
 
@@ -131,5 +154,28 @@ public enum ErrorCode {
 
     public String defaultMessage() {
         return defaultMessage;
+    }
+
+    /**
+     * Agent 가 보고한 사유 코드를 우리 코드로 옮긴다. ({@code ACK.reasonCode} · {@code RESULT.error.code})
+     *
+     * <p>계약의 {@code REASON_CODES} 여덟 개는 이름이 그대로 겹치므로 그대로 받는다.
+     * (원본은 slash-agent 의 {@code contracts/src/enums.ts})
+     *
+     * <p><b>목록 밖의 값은 받지 않는다.</b> 이름만 맞으면 무엇이든 통과시키면 Agent 가
+     * {@code AUTH_REQUIRED} 같은 값을 보내 작업을 엉뚱한 사유로 마감시킬 수 있다.
+     * 모르는 값과 빈 값은 모두 {@code fallback} 으로 접는다 — Agent 가 새 사유 코드를 먼저
+     * 배포하더라도 마감 자체가 실패하면 안 된다.
+     */
+    public static ErrorCode fromAgentReason(String reason, ErrorCode fallback) {
+        if (reason == null || reason.isBlank()) {
+            return fallback;
+        }
+        try {
+            ErrorCode parsed = valueOf(reason.trim());
+            return AGENT_REPORTABLE.contains(parsed) ? parsed : fallback;
+        } catch (IllegalArgumentException e) {
+            return fallback;
+        }
     }
 }

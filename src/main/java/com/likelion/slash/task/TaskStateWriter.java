@@ -80,6 +80,55 @@ public class TaskStateWriter {
         return true;
     }
 
+    /**
+     * Agent 가 보낸 결과를 반영해 성공으로 마감한다. (WBS W1-04)
+     *
+     * <p><b>{@code RUNNING} 을 거치지 않고 결과가 올 수 있다.</b> ACK 가 유실되거나 작업이 아주
+     * 빨리 끝나면 작업은 아직 {@code QUEUED} 인데 RESULT 가 먼저 도착한다. 전이 규칙에
+     * {@code QUEUED → SUCCEEDED} 는 없으므로 그때는 {@code RUNNING} 을 한 칸 지나간다.
+     * 결과가 왔다는 것 자체가 실행이 있었다는 증거라 없는 사실을 지어내는 것이 아니다.
+     *
+     * <p>타임라인에는 지나간 칸도 그대로 남긴다. 화면의 진행 표시가 이 기록이라, 건너뛰면
+     * 실행된 적 없는 작업이 성공한 것처럼 보인다.
+     *
+     * @return 반영 여부. 거짓이면 이미 마감된 작업이다. (기한 만료 스윕이 먼저 닿은 경우)
+     */
+    @Transactional
+    public boolean succeed(long taskId, JSONB result, String message) {
+        if (finishSucceeded(taskId, result, message)) {
+            return true;
+        }
+
+        // 아직 QUEUED 다. ACK 를 못 받은 것이므로 RUNNING 을 지나 다시 마감한다.
+        if (!move(taskId, TaskStatus.QUEUED, TaskStatus.RUNNING, null, "PC 가 작업을 시작했습니다.")) {
+            log.debug("성공 마감을 반영하지 못했다. 이미 마감된 작업이다. taskId={}", taskId);
+            return false;
+        }
+        return finishSucceeded(taskId, result, message);
+    }
+
+    private boolean finishSucceeded(long taskId, JSONB result, String message) {
+        if (!taskRepository.succeed(taskId, TaskStatus.RUNNING, result)) {
+            return false;
+        }
+        taskEventRepository.append(taskId, TaskStatus.RUNNING, TaskStatus.SUCCEEDED, null, message);
+        return true;
+    }
+
+    /**
+     * Agent 가 보고한 실패를 반영해 마감한다.
+     *
+     * <p>ACK 거부는 {@code QUEUED} 에서, RESULT 실패는 {@code RUNNING} 에서 온다. 부르는 쪽이
+     * 둘 중 어디인지 알 필요가 없게 여기서 모두 시도한다.
+     *
+     * @return 반영 여부. 거짓이면 이미 마감된 작업이다.
+     */
+    @Transactional
+    public boolean failFromAgent(long taskId, ErrorCode errorCode, String message) {
+        return fail(taskId, TaskStatus.RUNNING, errorCode, message)
+                || fail(taskId, TaskStatus.QUEUED, errorCode, message);
+    }
+
     /** 실패로 마감하고 기록한다. */
     @Transactional
     public boolean fail(long taskId, TaskStatus from, ErrorCode errorCode, String message) {
