@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -20,12 +21,17 @@ import com.likelion.slash.common.Sha256;
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AgentDispatchStatus;
 import com.likelion.slash.common.enums.DeviceStatus;
+import com.likelion.slash.common.enums.TaskStatus;
+import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.device.DeviceCapabilityRepository;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.dispatch.AgentDispatchRepository;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
+import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.task.TaskRepository;
 import com.likelion.slash.task.TaskService;
+import com.likelion.slash.task.TaskStateWriter;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -39,10 +45,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TimeZone;
 import java.util.UUID;
+import org.jooq.JSONB;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -67,6 +75,10 @@ class AgentWebSocketHandlerTest {
     private static final String 기기_TOKEN = "device-token-값";
     private static final int RAW_KEY_LENGTH = 32;
 
+    private static final long 작업_PK = 11L;
+    private static final UUID 작업_공개ID = UUID.randomUUID();
+    private static final UUID 상관ID = UUID.randomUUID();
+
     /**
      * 애플리케이션이 쓰는 설정을 그대로 맞춘 Mapper.
      *
@@ -86,6 +98,8 @@ class AgentWebSocketHandlerTest {
     private final DeviceCapabilityRepository deviceCapabilityRepository = mock(DeviceCapabilityRepository.class);
     private final AgentDispatchRepository agentDispatchRepository = mock(AgentDispatchRepository.class);
     private final TaskService taskService = mock(TaskService.class);
+    private final TaskRepository taskRepository = mock(TaskRepository.class);
+    private final TaskStateWriter stateWriter = mock(TaskStateWriter.class);
 
     private final AgentWebSocketHandler handler = new AgentWebSocketHandler(
             objectMapper,
@@ -94,7 +108,9 @@ class AgentWebSocketHandlerTest {
             deviceRepository,
             deviceCapabilityRepository,
             agentDispatchRepository,
-            taskService);
+            taskService,
+            taskRepository,
+            stateWriter);
 
     private KeyPair 기기_키쌍;
     private WebSocketSession session;
@@ -382,7 +398,7 @@ class AgentWebSocketHandlerTest {
     }
 
     @Test
-    @DisplayName("RESULT 의 status 가 SUCCEEDED 면 전달을 마감한다")
+    @DisplayName("RESULT 의 status 가 SUCCEEDED 면 전달과 작업을 함께 마감한다")
     void 성공_결과를_반영한다() throws Exception {
         인증한다();
         UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
@@ -395,10 +411,29 @@ class AgentWebSocketHandlerTest {
 
         verify(agentDispatchRepository).complete(7L);
         verify(agentDispatchRepository, never()).fail(anyLong(), any());
+
+        // 원장만 마감하고 작업을 두면 화면은 접수 직후 상태에 멈춘 채로 남는다.
+        // 결과 본문이 그대로 실려야 조회 API 가 내려줄 것이 생긴다.
+        verify(stateWriter).succeed(eq(작업_PK), eq(JSONB.valueOf("{\"files\":[]}")), any());
     }
 
     @Test
-    @DisplayName("RESULT 의 status 가 FAILED 면 사유와 함께 실패로 마감한다")
+    @DisplayName("결과가 null 이어도 성공으로 마감한다 — 계약이 허용하는 값이다")
+    void 빈_결과도_성공이다() throws Exception {
+        인증한다();
+        UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
+
+        보낸다(프레임("RESULT",
+                "\"dispatchId\":\"" + dispatchId + "\"",
+                "\"status\":\"SUCCEEDED\"",
+                "\"result\":null",
+                "\"error\":null"));
+
+        verify(stateWriter).succeed(eq(작업_PK), isNull(), any());
+    }
+
+    @Test
+    @DisplayName("RESULT 의 status 가 FAILED 면 사유와 함께 전달과 작업을 마감한다")
     void 실패_결과를_반영한다() throws Exception {
         인증한다();
         UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
@@ -410,10 +445,95 @@ class AgentWebSocketHandlerTest {
                 "\"error\":{\"code\":\"SEARCH_FOLDER_NOT_FOUND\",\"message\":\"없음\",\"retryable\":false}"));
 
         verify(agentDispatchRepository).fail(7L, "SEARCH_FOLDER_NOT_FOUND");
+        verify(stateWriter).failFromAgent(작업_PK, ErrorCode.SEARCH_FOLDER_NOT_FOUND, "없음");
+        verify(stateWriter, never()).succeed(anyLong(), any(), any());
     }
 
     @Test
-    @DisplayName("ACK 를 받으면 전달을 수락 처리한다")
+    @DisplayName("계약에 없는 사유 코드는 그대로 쓰지 않고 AGENT_TASK_FAILED 로 접는다")
+    void 모르는_사유는_접는다() throws Exception {
+        인증한다();
+        UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
+
+        // 이름만 맞으면 통과시키면 Agent 가 AUTH_REQUIRED 같은 값으로 엉뚱한 사유를 심을 수 있다.
+        보낸다(프레임("RESULT",
+                "\"dispatchId\":\"" + dispatchId + "\"",
+                "\"status\":\"FAILED\"",
+                "\"result\":null",
+                "\"error\":{\"code\":\"AUTH_REQUIRED\",\"message\":\"x\",\"retryable\":false}"));
+
+        verify(stateWriter).failFromAgent(eq(작업_PK), eq(ErrorCode.AGENT_TASK_FAILED), any());
+        verify(agentDispatchRepository).fail(7L, "AGENT_TASK_FAILED");
+    }
+
+    @Test
+    @DisplayName("RESULT 를 받으면 RESULT_ACK 를 돌려준다 — Agent 는 이걸 받아야 캐시를 비운다")
+    void RESULT_ACK_를_돌려준다() throws Exception {
+        인증한다();
+        UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
+        given(stateWriter.succeed(anyLong(), any(), any())).willReturn(true);
+
+        보낸다(프레임("RESULT",
+                "\"dispatchId\":\"" + dispatchId + "\"",
+                "\"status\":\"SUCCEEDED\"",
+                "\"result\":{}",
+                "\"error\":null"));
+
+        JsonNode ack = 마지막_응답();
+        assertThat(ack.path("type").asText()).isEqualTo("RESULT_ACK");
+        assertThat(ack.path("schemaVersion").asText()).isEqualTo("1.0");
+        assertThat(ack.path("persisted").asBoolean()).isTrue();
+        assertThat(ack.path("taskStatus").asText()).isEqualTo(TaskStatus.RUNNING.name());
+
+        // taskFields 셋은 계약이 함께 요구한다. 하나라도 없으면 Agent 가 프레임을 통째로 버린다.
+        assertThat(ack.path("taskId").asText()).isEqualTo(작업_공개ID.toString());
+        assertThat(ack.path("dispatchId").asText()).isEqualTo(dispatchId.toString());
+        assertThat(ack.path("correlationId").asText()).isEqualTo(상관ID.toString());
+    }
+
+    @Test
+    @DisplayName("상한을 넘는 결과에 연결을 잃지 않고 실패로 마감한다")
+    void 너무_큰_결과도_연결을_끊지_않는다() throws Exception {
+        인증한다();
+        UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
+
+        // ck_tasks_result_size(64KB)를 넘으면 DB 가 거부한다. 예외가 프레임 처리 밖으로
+        // 나가면 연결이 끊기고 작업은 어떤 상태로도 마감되지 않은 채 남는다.
+        given(stateWriter.succeed(anyLong(), any(), any()))
+                .willThrow(new DataIntegrityViolationException("ck_tasks_result_size"));
+
+        보낸다(프레임("RESULT",
+                "\"dispatchId\":\"" + dispatchId + "\"",
+                "\"status\":\"SUCCEEDED\"",
+                "\"result\":{\"big\":\"…\"}",
+                "\"error\":null"));
+
+        verify(stateWriter).failFromAgent(eq(작업_PK), eq(ErrorCode.AGENT_TASK_FAILED), any());
+        assertThat(session.isOpen()).isTrue();
+
+        // 마감은 했지만 결과를 담지는 못했다.
+        assertThat(마지막_응답().path("persisted").asBoolean()).isFalse();
+    }
+
+    @Test
+    @DisplayName("이미 마감된 작업이면 persisted=false 로 알린다")
+    void 반영하지_못하면_그렇게_알린다() throws Exception {
+        인증한다();
+        UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
+        given(stateWriter.succeed(anyLong(), any(), any())).willReturn(false);
+
+        보낸다(프레임("RESULT",
+                "\"dispatchId\":\"" + dispatchId + "\"",
+                "\"status\":\"SUCCEEDED\"",
+                "\"result\":{}",
+                "\"error\":null"));
+
+        // 거짓말하지 않는다. Agent 가 재시도 여부를 이 값으로 판단한다.
+        assertThat(마지막_응답().path("persisted").asBoolean()).isFalse();
+    }
+
+    @Test
+    @DisplayName("ACK 를 받으면 전달을 수락 처리하고 작업을 RUNNING 으로 옮긴다")
     void ACK_를_반영한다() throws Exception {
         인증한다();
         UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
@@ -421,6 +541,38 @@ class AgentWebSocketHandlerTest {
         보낸다(프레임("ACK", "\"dispatchId\":\"" + dispatchId + "\"", "\"accepted\":true"));
 
         verify(agentDispatchRepository).acknowledge(7L);
+        verify(stateWriter).move(eq(작업_PK), eq(TaskStatus.QUEUED), eq(TaskStatus.RUNNING), isNull(), any());
+    }
+
+    @Test
+    @DisplayName("ACK 로 거부하면 사유와 함께 작업까지 실패로 마감한다")
+    void ACK_거부를_반영한다() throws Exception {
+        인증한다();
+        UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
+
+        보낸다(프레임("ACK",
+                "\"dispatchId\":\"" + dispatchId + "\"",
+                "\"accepted\":false",
+                "\"reasonCode\":\"TASK_TYPE_NOT_SUPPORTED\""));
+
+        // 원장만 마감하면 작업은 QUEUED 로 굳어 끝나지 않는 진행 표시로 남는다.
+        verify(agentDispatchRepository).fail(7L, "TASK_TYPE_NOT_SUPPORTED");
+        verify(stateWriter).failFromAgent(eq(작업_PK), eq(ErrorCode.TASK_TYPE_NOT_SUPPORTED), any());
+        verify(agentDispatchRepository, never()).acknowledge(anyLong());
+    }
+
+    @Test
+    @DisplayName("사유 없이 거부하면 AGENT_REJECTED 로 마감한다")
+    void 사유_없는_거부도_마감한다() throws Exception {
+        인증한다();
+        UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.DISPATCHED);
+
+        보낸다(프레임("ACK",
+                "\"dispatchId\":\"" + dispatchId + "\"",
+                "\"accepted\":false",
+                "\"reasonCode\":null"));
+
+        verify(stateWriter).failFromAgent(eq(작업_PK), eq(ErrorCode.AGENT_REJECTED), any());
     }
 
     @Test
@@ -444,6 +596,22 @@ class AgentWebSocketHandlerTest {
         보낸다(프레임("RESULT", "\"dispatchId\":\"" + dispatchId + "\"", "\"status\":\"SUCCEEDED\""));
 
         verify(agentDispatchRepository, never()).complete(anyLong());
+        verify(stateWriter, never()).succeed(anyLong(), any(), any());
+    }
+
+    @Test
+    @DisplayName("마감된 전달에도 RESULT_ACK 는 다시 돌려준다 — 안 그러면 Agent 가 영영 재전송한다")
+    void 마감된_전달에도_응답한다() throws Exception {
+        인증한다();
+        UUID dispatchId = 전달을_준비한다(기기_PK, AgentDispatchStatus.COMPLETED);
+
+        // 첫 RESULT_ACK 가 유실되면 Agent 는 결과를 캐시에 둔 채 재연결마다 다시 보낸다.
+        // 그때 아무 응답도 하지 않으면 캐시를 비울 방법이 없어 재전송이 끝나지 않는다.
+        보낸다(프레임("RESULT", "\"dispatchId\":\"" + dispatchId + "\"", "\"status\":\"SUCCEEDED\""));
+
+        JsonNode ack = 마지막_응답();
+        assertThat(ack.path("type").asText()).isEqualTo("RESULT_ACK");
+        assertThat(ack.path("dispatchId").asText()).isEqualTo(dispatchId.toString());
     }
 
     @Test
@@ -545,6 +713,13 @@ class AgentWebSocketHandlerTest {
                 .encodeToString(Arrays.copyOfRange(encoded, encoded.length - RAW_KEY_LENGTH, encoded.length));
     }
 
+    /**
+     * 전달과 그 전달이 가리키는 작업을 함께 세운다.
+     *
+     * <p>작업까지 세우는 것은 RESULT_ACK 가 {@code taskId}·{@code correlationId} 를 담기
+     * 때문이다. 계약({@code taskFields})이 셋을 함께 요구해서 하나라도 없으면 Agent 가
+     * 프레임 전체를 거부한다.
+     */
     private UUID 전달을_준비한다(long deviceId, AgentDispatchStatus status) {
         UUID publicId = UUID.randomUUID();
 
@@ -552,9 +727,17 @@ class AgentWebSocketHandlerTest {
         dispatch.setId(7L);
         dispatch.setPublicId(publicId);
         dispatch.setDeviceId(deviceId);
+        dispatch.setTaskId(작업_PK);
         dispatch.setStatus(status.name());
 
+        TasksRecord task = new TasksRecord();
+        task.setId(작업_PK);
+        task.setPublicId(작업_공개ID);
+        task.setCorrelationId(상관ID);
+        task.setStatus(TaskStatus.RUNNING.name());
+
         when(agentDispatchRepository.findByPublicId(publicId)).thenReturn(Optional.of(dispatch));
+        when(taskRepository.findById(작업_PK)).thenReturn(Optional.of(task));
         return publicId;
     }
 

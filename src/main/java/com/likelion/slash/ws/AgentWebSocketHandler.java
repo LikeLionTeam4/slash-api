@@ -6,15 +6,21 @@ import com.likelion.slash.common.Sha256;
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AgentDispatchStatus;
 import com.likelion.slash.common.enums.DeviceStatus;
+import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
+import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.device.DeviceCapabilityRepository;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.dispatch.AgentDispatchRepository;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
+import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.task.TaskRepository;
 import com.likelion.slash.task.TaskService;
+import com.likelion.slash.task.TaskStateWriter;
 import com.likelion.slash.ws.dto.ChallengeFrame;
 import com.likelion.slash.ws.dto.ProtocolErrorFrame;
+import com.likelion.slash.ws.dto.ResultAckFrame;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -27,8 +33,10 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.jooq.JSONB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -49,9 +57,10 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  *   Agent  READY      {supportedTaskTypes, ...}          →  devices.status = READY
  *   Agent  HEARTBEAT                                     →  30초마다. last_seen_at 갱신
  *          ←  TASK      {dispatchId, taskType, ...}         다른 Pod 에서 발행된 것도 여기로 나간다
- *   Agent  ACK        {dispatchId, accepted}             →
+ *   Agent  ACK        {dispatchId, accepted}             →  tasks → RUNNING
  *   Agent  PROGRESS   {stage, percent}                   →
- *   Agent  RESULT     {dispatchId, status, result}       →
+ *   Agent  RESULT     {dispatchId, status, result}       →  tasks → SUCCEEDED·FAILED
+ *          ←  RESULT_ACK {persisted, taskStatus}            받아야 Agent 가 결과 캐시를 비운다
  * </pre>
  *
  * <p><b>계약은 slash-agent 의 {@code contracts/src/agentMessages.ts} 가 원본이다.</b>
@@ -69,11 +78,10 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  *
  * <p><b>남은 것</b>
  * <ul>
- *   <li>RESULT_ACK — Agent 는 이것을 받아야 결과 캐시를 지운다. 못 받으면 재연결마다 과거
- *       결과를 다시 보낸다. 반영할 Task 상태가 W1-04 에서 정해지므로 그때 함께 붙인다.</li>
  *   <li>READY 의 {@code searchFolders}·{@code projectWorkspaces} — 저장할 표가 없다.
  *       FILE_SEARCH 의 필수 인자 {@code searchFolderId} 가 여기서 나오므로 W1-03 과 함께 만든다.</li>
  *   <li>핸드셰이크 시간 제한 — HELLO 없이 붙어만 있는 연결이 쌓이는 것을 막아야 한다.</li>
+ *   <li>PROGRESS 를 화면에 전달하는 것 — 지금은 기록만 남기고 흘려보낸다.</li>
  * </ul>
  */
 @Component
@@ -120,6 +128,8 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final DeviceCapabilityRepository deviceCapabilityRepository;
     private final AgentDispatchRepository agentDispatchRepository;
     private final TaskService taskService;
+    private final TaskRepository taskRepository;
+    private final TaskStateWriter stateWriter;
 
     public AgentWebSocketHandler(ObjectMapper objectMapper,
                                  WsSessionRegistry registry,
@@ -127,7 +137,9 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                                  DeviceRepository deviceRepository,
                                  DeviceCapabilityRepository deviceCapabilityRepository,
                                  AgentDispatchRepository agentDispatchRepository,
-                                 TaskService taskService) {
+                                 TaskService taskService,
+                                 TaskRepository taskRepository,
+                                 TaskStateWriter stateWriter) {
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.signatureVerifier = signatureVerifier;
@@ -135,6 +147,8 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         this.deviceCapabilityRepository = deviceCapabilityRepository;
         this.agentDispatchRepository = agentDispatchRepository;
         this.taskService = taskService;
+        this.taskRepository = taskRepository;
+        this.stateWriter = stateWriter;
     }
 
     // ------------------------------------------------------------------
@@ -414,20 +428,33 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 frame.path("percent").asInt(0));
     }
 
-    /** Agent 가 작업을 받아들였거나 거부했다. */
+    /**
+     * Agent 가 작업을 받아들였거나 거부했다.
+     *
+     * <p>전달 원장과 {@code tasks} 를 함께 옮긴다. 원장만 고치면 화면은 접수 직후 상태에 멈춘
+     * 채로 남는다 — 사용자에게는 아무 일도 일어나지 않은 것으로 보인다.
+     */
     private void handleAck(WebSocketSession session, JsonNode frame, State state, UUID eventId) throws IOException {
         Optional<AgentDispatchesRecord> dispatch = findOwnedDispatch(session, frame, state, eventId);
-        if (dispatch.isEmpty()) {
+        if (dispatch.isEmpty() || !isActive(dispatch.get())) {
             return;
         }
 
         long id = dispatch.get().getId();
+        long taskId = dispatch.get().getTaskId();
 
         if (frame.path("accepted").asBoolean(false)) {
             agentDispatchRepository.acknowledge(id);
-        } else {
-            agentDispatchRepository.fail(id, frame.path("reasonCode").asText(null));
+            stateWriter.move(taskId, TaskStatus.QUEUED, TaskStatus.RUNNING, null, "PC 가 작업을 시작했습니다.");
+            return;
         }
+
+        // 거부. 사유는 Agent 가 보낸 것을 쓰되 계약에 있는 값만 받는다.
+        ErrorCode reason = ErrorCode.fromAgentReason(
+                frame.path("reasonCode").asText(null), ErrorCode.AGENT_REJECTED);
+
+        agentDispatchRepository.fail(id, reason.name());
+        stateWriter.failFromAgent(taskId, reason, reason.defaultMessage());
     }
 
     /**
@@ -436,22 +463,102 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
      * <p>성공 여부는 {@code status} 문자열이 유일한 기준이다. 계약에 boolean 판정 필드는 없다.
      */
     private void handleResult(WebSocketSession session, JsonNode frame, State state, UUID eventId) throws IOException {
-        Optional<AgentDispatchesRecord> dispatch = findOwnedDispatch(session, frame, state, eventId);
-        if (dispatch.isEmpty()) {
+        Optional<AgentDispatchesRecord> owned = findOwnedDispatch(session, frame, state, eventId);
+        if (owned.isEmpty()) {
             return;
         }
 
-        long id = dispatch.get().getId();
+        AgentDispatchesRecord dispatch = owned.get();
+        long id = dispatch.getId();
+        long taskId = dispatch.getTaskId();
 
-        if (AgentProtocol.RESULT_SUCCEEDED.equals(frame.path("status").asText(null))) {
-            agentDispatchRepository.complete(id);
-        } else {
-            agentDispatchRepository.fail(id, frame.path("error").path("code").asText(null));
+        // 이미 마감된 전달이다. 다시 반영하지는 않지만 RESULT_ACK 는 돌려줘야 한다.
+        // 첫 RESULT_ACK 가 유실된 경우가 여기로 오는데, 아무 응답도 하지 않으면 Agent 는
+        // 결과 캐시를 비울 방법이 없어 재연결마다 같은 결과를 영영 다시 보낸다.
+        if (!isActive(dispatch)) {
+            log.debug("이미 마감된 전달에 RESULT 가 다시 왔다 dispatchId={}", dispatch.getPublicId());
+            sendResultAck(session, taskId, dispatch.getPublicId(), true);
+            return;
         }
 
-        // 결과 본문을 tasks 에 반영하고 RESULT_ACK 를 돌려주는 것은 W1-04 다.
-        // RESULT_ACK 를 보내지 않으면 Agent 는 결과 캐시를 비우지 못해 재연결마다 다시 보낸다.
-        // 데이터는 안전하지만(활성 상태에서만 반영) 그때까지는 중복 수신을 감수한다.
+        boolean succeeded = AgentProtocol.RESULT_SUCCEEDED.equals(frame.path("status").asText(null));
+
+        boolean persisted;
+        if (succeeded) {
+            agentDispatchRepository.complete(id);
+            persisted = persistResult(taskId, frame);
+        } else {
+            ErrorCode reason = ErrorCode.fromAgentReason(
+                    frame.path("error").path("code").asText(null), ErrorCode.AGENT_TASK_FAILED);
+
+            agentDispatchRepository.fail(id, reason.name());
+            persisted = stateWriter.failFromAgent(taskId, reason, agentMessage(frame, reason));
+        }
+
+        sendResultAck(session, taskId, dispatch.getPublicId(), persisted);
+    }
+
+    /**
+     * 결과 본문을 {@code tasks} 에 저장한다.
+     *
+     * <p><b>상한을 넘는 결과에 연결을 잃지 않는다.</b> {@code ck_tasks_result_size}(64KB)를 넘으면
+     * DB 가 거부하는데, 예외를 그대로 두면 프레임 처리 밖으로 나가 연결이 끊긴다. 작업은 어떤
+     * 상태로도 마감되지 않은 채 남아 사용자에게는 무한 대기로 보인다. 결과를 못 담더라도
+     * 마감은 시키는 편이 낫다.
+     *
+     * @return 결과를 실제로 담았는지. 이미 마감된 작업이거나 상한을 넘겼으면 거짓이다.
+     */
+    private boolean persistResult(long taskId, JsonNode frame) {
+        JsonNode result = frame.path("result");
+        JSONB body = result.isMissingNode() || result.isNull() ? null : JSONB.valueOf(result.toString());
+
+        try {
+            return stateWriter.succeed(taskId, body, "작업을 마쳤습니다.");
+
+        } catch (DataAccessException e) {
+            log.warn("결과를 저장하지 못해 실패로 마감한다 taskId={}: {}", taskId, e.getMessage());
+            stateWriter.failFromAgent(taskId, ErrorCode.AGENT_TASK_FAILED,
+                    "결과가 너무 커서 저장하지 못했습니다.");
+
+            // 마감은 했지만 결과를 담지는 못했다. persisted 는 담았는지를 뜻하므로 거짓이다.
+            // Agent 가 다시 보내더라도 그때는 전달이 이미 마감돼 있어 RESULT_ACK 로 정리된다.
+            return false;
+        }
+    }
+
+    /** 실패 사유 문구. Agent 가 보낸 설명을 쓰되 없으면 코드의 기본 문구로 대신한다. */
+    private String agentMessage(JsonNode frame, ErrorCode reason) {
+        String message = frame.path("error").path("message").asText(null);
+        return message == null || message.isBlank() ? reason.defaultMessage() : message;
+    }
+
+    /**
+     * 결과를 받았음을 Agent 에게 알린다.
+     *
+     * <p>이것을 보내지 않으면 Agent 는 결과 캐시를 비우지 못해 재연결할 때마다 같은 결과를
+     * 다시 보낸다. 중복 반영은 {@link #isActive} 가 막지만 프레임이 계속 오가는 것은 그대로다.
+     *
+     * <p>보내지 못해도 반영은 이미 끝나 있다. 여기서 예외를 올리면 방금 마감한 작업의 연결까지
+     * 끊게 되므로 기록만 남긴다. 못 보낸 것은 Agent 가 다시 보낼 때 정리된다.
+     */
+    private void sendResultAck(WebSocketSession session, long taskId, UUID dispatchPublicId, boolean persisted) {
+        Optional<TasksRecord> task = taskRepository.findById(taskId);
+        if (task.isEmpty()) {
+            log.warn("RESULT_ACK 를 보낼 작업을 찾지 못했다 taskId={}", taskId);
+            return;
+        }
+
+        try {
+            send(session, ResultAckFrame.of(
+                    task.get().getPublicId(),
+                    dispatchPublicId,
+                    task.get().getCorrelationId(),
+                    persisted,
+                    TaskStatus.valueOf(task.get().getStatus())));
+
+        } catch (IOException e) {
+            log.warn("RESULT_ACK 를 보내지 못했다 taskId={}: {}", taskId, e.getMessage());
+        }
     }
 
     /**
@@ -459,6 +566,10 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
      *
      * <p>확인하지 않으면 A 사용자의 PC 가 남의 {@code dispatchId} 를 보내 그 작업을 실패로
      * 마감시킬 수 있다. 소유권 격리(DV-04) 위반이다.
+     *
+     * <p><b>마감 여부는 여기서 보지 않는다.</b> 마감된 전달에 무엇을 할지가 프레임마다 다르다 —
+     * ACK 는 그냥 버리면 되지만 RESULT 는 응답을 돌려줘야 Agent 가 결과 캐시를 비운다.
+     * 판단은 부르는 쪽이 {@link #isActive} 로 한다.
      */
     private Optional<AgentDispatchesRecord> findOwnedDispatch(
             WebSocketSession session, JsonNode frame, State state, UUID eventId) throws IOException {
@@ -475,20 +586,23 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 .filter(record -> record.getDeviceId() == deviceId);
 
         if (dispatch.isEmpty()) {
-            // 이미 만료돼 마감된 전달일 수도 있고, 남의 것을 보낸 것일 수도 있다.
-            // 어느 쪽이든 반영하지 않는다. 끊지는 않는다. (만료는 정상적으로 일어난다)
+            // 없는 전달이거나 남의 것이다. 어느 쪽인지 알려 주지 않고 조용히 버린다.
+            // 끊지는 않는다 — 만료는 정상적으로 일어난다.
             log.warn("처리할 수 없는 전달 참조 deviceId={} dispatchId={}",
                     deviceId, frame.path("dispatchId").asText(null));
-            return Optional.empty();
-        }
-
-        // 이미 마감된 전달에 다시 반영하지 않는다. 같은 ACK·RESULT 를 두 번 받아도
-        // 한 번만 반영된다는 계약을 Repository 의 조건절과 함께 이중으로 지킨다.
-        if (!AgentDispatchStatus.valueOf(dispatch.get().getStatus()).isActive()) {
-            return Optional.empty();
         }
 
         return dispatch;
+    }
+
+    /**
+     * 아직 진행 중인 전달인가.
+     *
+     * <p>거짓이면 같은 ACK·RESULT 를 두 번 받은 것이다. 반영은 한 번만 한다는 계약을
+     * Repository 의 조건절과 함께 이중으로 지킨다.
+     */
+    private boolean isActive(AgentDispatchesRecord dispatch) {
+        return AgentDispatchStatus.valueOf(dispatch.getStatus()).isActive();
     }
 
     // ------------------------------------------------------------------
