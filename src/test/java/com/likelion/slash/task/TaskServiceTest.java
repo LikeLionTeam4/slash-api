@@ -1,5 +1,6 @@
 package com.likelion.slash.task;
 
+import static com.likelion.slash.jooq.Tables.AGENT_DISPATCHES;
 import static com.likelion.slash.jooq.Tables.DEVICES;
 import static com.likelion.slash.jooq.Tables.TASKS;
 import static com.likelion.slash.support.TestFixtures.사용자;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -164,6 +166,45 @@ class TaskServiceTest {
         // uk_dispatch_active_device 가 기기당 활성 전달 한 건만 허용한다.
         assertThat(taskService.dispatchWaiting(deviceId)).isEqualTo(1);
         assertThat(taskService.dispatchWaiting(deviceId)).isZero();
+    }
+
+    @Test
+    @DisplayName("사전 확인을 지나고 나서 기기를 뺏기면 DEVICE_BUSY 로 마감한다")
+    void 전달_경쟁에서_지면_마감한다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        // isDeviceOccupied 는 조회 시점의 스냅샷이라 동시에 들어온 두 요청을 갈라내지 못한다.
+        // 최종 판정은 uk_dispatch_active_device 가 하고, 진 쪽은 여기서 예외를 받는다.
+        given(taskDispatcher.dispatch(any(), anyLong()))
+                .willThrow(new DuplicateKeyException("uk_dispatch_active_device"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        // 전달이 없는데 QUEUED 로 남으면 ACK·RESULT 를 영영 못 받아 무한 대기로 보인다.
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        TasksRecord 작업 = 작업조회(응답.taskId());
+        assertThat(작업.getStatus()).isEqualTo(TaskStatus.FAILED.name());
+        assertThat(작업.getErrorCode()).isEqualTo(ErrorCode.DEVICE_BUSY.name());
+        assertThat(dsl.fetchCount(AGENT_DISPATCHES, AGENT_DISPATCHES.DEVICE_ID.eq(deviceId))).isZero();
+    }
+
+    @Test
+    @DisplayName("밀린 작업을 내보내다 기기를 뺏겨도 QUEUED 로 방치하지 않는다")
+    void 대기작업_전달_경쟁에서_지면_마감한다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        기기상태를(deviceId, DeviceStatus.OFFLINE);
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        UUID taskId = taskService.accept(사용자, new CreateRequestRequest("/status", null), null).taskId();
+        given(taskDispatcher.dispatch(any(), anyLong()))
+                .willThrow(new DuplicateKeyException("uk_dispatch_active_device"));
+
+        assertThat(taskService.dispatchWaiting(deviceId)).isZero();
+
+        TasksRecord 작업 = 작업조회(taskId);
+        assertThat(작업.getStatus()).isEqualTo(TaskStatus.FAILED.name());
+        assertThat(작업.getErrorCode()).isEqualTo(ErrorCode.DEVICE_BUSY.name());
     }
 
     @Test

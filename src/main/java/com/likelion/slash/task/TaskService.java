@@ -28,6 +28,7 @@ import java.util.UUID;
 import org.jooq.JSONB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -320,10 +321,32 @@ public class TaskService {
             return currentStatusOf(task.getId());
         }
 
-        if (ready) {
-            dispatch(task.getId());
+        return ready ? dispatchOrRelease(task.getId()) : next;
+    }
+
+    /**
+     * 전달을 만들어 내보내되, 기기를 다른 요청에 뺏겼으면 이 작업을 마감한다.
+     *
+     * <p>{@link TaskRepository#isDeviceOccupied} 는 조회 시점의 스냅샷이라 같은 순간에 들어온
+     * 두 요청을 갈라내지 못한다. <b>최종 판정은 {@code uk_dispatch_active_device} 가 한다.</b>
+     * 진 쪽은 {@link DuplicateKeyException} 을 받는데, 이때 이미 {@code QUEUED} 는 별도
+     * 트랜잭션으로 커밋된 뒤다.
+     *
+     * <p>그대로 두면 <b>전달 없이 {@code QUEUED} 로 굳은 작업</b>이 남는다. 그 작업은 ACK 도
+     * RESULT 도 받을 수 없어 화면에는 끝나지 않는 진행 표시로 보인다. 되돌릴 자리가 여기뿐이라
+     * 여기서 마감한다. ({@code AgentDispatchRepository} 주석이 요구하는 처리다)
+     */
+    private TaskStatus dispatchOrRelease(long taskId) {
+        try {
+            dispatch(taskId);
+            return TaskStatus.QUEUED;
+
+        } catch (DuplicateKeyException e) {
+            log.info("전달 경쟁에서 밀려 작업을 마감한다 taskId={}", taskId);
+            stateWriter.fail(taskId, TaskStatus.QUEUED, ErrorCode.DEVICE_BUSY,
+                    "선택한 PC 가 다른 작업을 실행 중입니다.");
+            return TaskStatus.FAILED;
         }
-        return next;
     }
 
     /**
@@ -391,7 +414,13 @@ public class TaskService {
                     null, "PC 가 연결되어 작업을 보냈습니다.")) {
                 return 0;
             }
-            dispatch(task.getId());
+
+            // 여기서도 전달 경쟁에서 밀릴 수 있다. 접수 경로와 같은 이유로, 마감하지 않으면
+            // 전달 없이 QUEUED 로 굳는다. 예외를 밖으로 내보내지 않는 것만으로는 부족하다.
+            if (dispatchOrRelease(task.getId()) == TaskStatus.FAILED) {
+                return 0;
+            }
+
             log.info("대기 작업 전달 taskId={} deviceId={}", task.getPublicId(), deviceId);
             return 1;
 

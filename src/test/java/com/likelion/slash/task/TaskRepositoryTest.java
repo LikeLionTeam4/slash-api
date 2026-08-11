@@ -216,17 +216,24 @@ class TaskRepositoryTest {
     }
 
     @Test
-    @DisplayName("마감된 작업은 기기의 동시 실행 판정에서 빠진다")
-    void 동시_실행_판정() {
+    @DisplayName("기기 점유 판정은 실제로 내보낸 작업만 센다")
+    void 기기_점유_판정() {
         long userId = 사용자(dsl);
         long deviceId = 준비된_기기(dsl, userId);
-        long taskId = 작업(dsl, userId, deviceId, TaskStatus.RUNNING.name());
 
-        assertThat(taskRepository.hasActiveTaskOnDevice(deviceId)).isTrue();
+        // 아직 기기로 보내지 않은 작업은 기기를 붙들고 있지 않다.
+        // 이걸 점유로 세면 꺼진 PC 앞으로 두 번째 요청을 넣을 수 없다.
+        long 대기중 = 작업(dsl, userId, deviceId, TaskStatus.WAITING_FOR_DEVICE.name());
+        assertThat(taskRepository.isDeviceOccupied(deviceId)).isFalse();
 
-        taskRepository.succeed(taskId, TaskStatus.RUNNING, JSONB.valueOf("{}"));
+        taskRepository.transition(대기중, TaskStatus.WAITING_FOR_DEVICE, TaskStatus.QUEUED);
+        assertThat(taskRepository.isDeviceOccupied(deviceId)).isTrue();
 
-        assertThat(taskRepository.hasActiveTaskOnDevice(deviceId)).isFalse();
+        taskRepository.transition(대기중, TaskStatus.QUEUED, TaskStatus.RUNNING);
+        assertThat(taskRepository.isDeviceOccupied(deviceId)).isTrue();
+
+        taskRepository.succeed(대기중, TaskStatus.RUNNING, JSONB.valueOf("{}"));
+        assertThat(taskRepository.isDeviceOccupied(deviceId)).isFalse();
     }
 
     @Test

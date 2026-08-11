@@ -112,28 +112,16 @@ public class TaskRepository {
     }
 
     /**
-     * 이 기기가 이미 다른 작업을 실행 중인지 확인한다. (P0 는 기기당 동시 1건)
+     * 이 기기가 <b>지금 실제로 붙들려 있는지</b> 확인한다. (P0 는 기기당 동시 1건)
      *
-     * <p>최종 판정은 {@code agent_dispatches} 의 부분 UNIQUE 제약이 하므로 여기서는
-     * 요청을 받자마자 DEVICE_BUSY 로 빠르게 되돌려 주기 위한 사전 확인으로만 쓴다.
-     */
-    public boolean hasActiveTaskOnDevice(long deviceId) {
-        return dsl.fetchExists(
-                dsl.selectFrom(TASKS)
-                        .where(TASKS.DEVICE_ID.eq(deviceId))
-                        .and(TASKS.STATUS.in(ACTIVE_STATUSES)));
-    }
-
-    /**
-     * 이 기기가 <b>지금 실제로 붙들려 있는지</b> 확인한다.
+     * <p>세는 대상은 {@code QUEUED}·{@code RUNNING} 둘뿐이다. {@code WAITING_FOR_DEVICE} 는
+     * 아직 기기로 보내지도 않은 상태라 기기를 붙들고 있지 않다. 미완료 작업 전체를 세면
+     * <b>PC 가 꺼져 있을 때 두 번째 요청이 DEVICE_BUSY 로 거부된다</b> — 꺼진 PC 는 아무것도
+     * 실행 중이 아닌데 사실과 다르게 답하는 셈이고, 미리 접수해 두는 것 자체를 막는다.
      *
-     * <p>{@link #hasActiveTaskOnDevice} 와 다르다. 저쪽은 미완료 작업 전체를 세지만, 여기서는
-     * 기기로 이미 내보냈거나 실행 중인 것만 센다. {@code WAITING_FOR_DEVICE} 는 아직 기기에
-     * 보내지도 않은 상태라 기기를 붙들고 있지 않다.
-     *
-     * <p>둘을 구분하지 않으면 <b>PC 가 꺼져 있을 때 두 번째 요청이 DEVICE_BUSY 로 거부된다.</b>
-     * 꺼진 PC 는 아무 작업도 실행 중이 아닌데 "다른 작업을 실행 중"이라고 답하는 셈이라
-     * 사실과 다르고, 미리 접수해 두는 것 자체를 막는다.
+     * <p><b>최종 판정은 여기가 아니다.</b> 이 조회는 스냅샷이라 같은 순간에 들어온 두 요청을
+     * 갈라내지 못한다. 판정은 {@code agent_dispatches} 의 {@code uk_dispatch_active_device} 가
+     * 하고, 여기서는 요청을 받자마자 빠르게 되돌려 주기 위한 사전 확인으로만 쓴다.
      */
     public boolean isDeviceOccupied(long deviceId) {
         return dsl.fetchExists(
