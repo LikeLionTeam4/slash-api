@@ -163,9 +163,11 @@ class DeviceRepositoryTest {
                 .where(DEVICES.ID.eq(끊긴_기기))
                 .execute();
 
-        int 내려간_수 = deviceRepository.markOfflineWhenHeartbeatStale(SlashTime.now().minusSeconds(90));
+        deviceRepository.markOfflineWhenHeartbeatStale(SlashTime.now().minusSeconds(90));
 
-        assertThat(내려간_수).isEqualTo(1);
+        // 반환값(영향 건수)으로 판정하지 않는다. 표 전체를 쓸어담는 배치라 이 시험 밖에서
+        // 커밋된 행 하나에도 흔들린다 — bootRun 으로 손 확인한 흔적이 로컬 DB 에 남아 있으면
+        // 그대로 깨진다. "끊긴 것만" 은 이 시험이 만든 두 기기를 직접 보면 그대로 확인된다.
         assertThat(deviceRepository.findById(끊긴_기기).orElseThrow().getStatus())
                 .isEqualTo(DeviceStatus.OFFLINE.name());
         assertThat(deviceRepository.findById(살아있는_기기).orElseThrow().getStatus())

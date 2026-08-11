@@ -154,10 +154,11 @@ class AgentDispatchRepositoryTest {
         long taskId = 작업(dsl, userId, deviceId, TaskStatus.QUEUED.name());
         var dispatch = agentDispatchRepository.create(taskId, deviceId, SlashTime.now().plusMinutes(5));
 
-        int 마감한_건수 = agentDispatchRepository.expireOverdue(
+        agentDispatchRepository.expireOverdue(
                 SlashTime.now().plusMinutes(10), ErrorCode.TASK_EXPIRED.name());
 
-        assertThat(마감한_건수).isEqualTo(1);
+        // 반환값(영향 건수)으로 판정하지 않는다. 표 전체를 쓸어담는 배치라 이 시험 밖에서
+        // 커밋된 미완료 전달 하나에도 흔들린다. 내가 만든 전달을 직접 보면 충분하다.
         var 만료된_전달 = agentDispatchRepository.findByPublicId(dispatch.getPublicId()).orElseThrow();
         assertThat(만료된_전달.getStatus()).isEqualTo(AgentDispatchStatus.EXPIRED.name());
         assertThat(만료된_전달.getCompletedAt()).isNotNull();
