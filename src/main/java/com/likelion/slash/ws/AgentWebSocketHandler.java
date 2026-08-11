@@ -12,6 +12,7 @@ import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.dispatch.AgentDispatchRepository;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
+import com.likelion.slash.task.TaskService;
 import com.likelion.slash.ws.dto.ChallengeFrame;
 import com.likelion.slash.ws.dto.ProtocolErrorFrame;
 import java.io.IOException;
@@ -118,19 +119,22 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final DeviceRepository deviceRepository;
     private final DeviceCapabilityRepository deviceCapabilityRepository;
     private final AgentDispatchRepository agentDispatchRepository;
+    private final TaskService taskService;
 
     public AgentWebSocketHandler(ObjectMapper objectMapper,
                                  WsSessionRegistry registry,
                                  AgentSignatureVerifier signatureVerifier,
                                  DeviceRepository deviceRepository,
                                  DeviceCapabilityRepository deviceCapabilityRepository,
-                                 AgentDispatchRepository agentDispatchRepository) {
+                                 AgentDispatchRepository agentDispatchRepository,
+                                 TaskService taskService) {
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.signatureVerifier = signatureVerifier;
         this.deviceRepository = deviceRepository;
         this.deviceCapabilityRepository = deviceCapabilityRepository;
         this.agentDispatchRepository = agentDispatchRepository;
+        this.taskService = taskService;
     }
 
     // ------------------------------------------------------------------
@@ -367,6 +371,16 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         log.info("Agent READY deviceId={} 지원작업={} 검색폴더={}개 동시작업={}",
                 deviceId, reported, frame.path("searchFolders").size(),
                 frame.path("maxConcurrentTasks").asInt(0));
+
+        // PC 가 꺼져 있는 동안 접수된 작업을 이제 내보낸다. (WBS W1-04)
+        //
+        // 여기서 실패해도 READY 자체는 성공으로 둔다. 기기는 이미 작업을 받을 수 있는 상태이고,
+        // 밀린 작업은 다음 연결이나 재발행 스윕이 다시 집어 간다. 연결 수립을 실패시킬 일이 아니다.
+        try {
+            taskService.dispatchWaiting(deviceId);
+        } catch (Exception e) {
+            log.warn("대기 작업 전달 실패 deviceId={}: {}", deviceId, e.getMessage());
+        }
     }
 
     private void handleHeartbeat(WebSocketSession session, State state, UUID eventId) throws IOException {

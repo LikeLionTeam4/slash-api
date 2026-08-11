@@ -112,16 +112,40 @@ public class TaskRepository {
     }
 
     /**
-     * 이 기기가 이미 다른 작업을 실행 중인지 확인한다. (P0 는 기기당 동시 1건)
+     * 이 기기가 <b>지금 실제로 붙들려 있는지</b> 확인한다. (P0 는 기기당 동시 1건)
      *
-     * <p>최종 판정은 {@code agent_dispatches} 의 부분 UNIQUE 제약이 하므로 여기서는
-     * 요청을 받자마자 DEVICE_BUSY 로 빠르게 되돌려 주기 위한 사전 확인으로만 쓴다.
+     * <p>세는 대상은 {@code QUEUED}·{@code RUNNING} 둘뿐이다. {@code WAITING_FOR_DEVICE} 는
+     * 아직 기기로 보내지도 않은 상태라 기기를 붙들고 있지 않다. 미완료 작업 전체를 세면
+     * <b>PC 가 꺼져 있을 때 두 번째 요청이 DEVICE_BUSY 로 거부된다</b> — 꺼진 PC 는 아무것도
+     * 실행 중이 아닌데 사실과 다르게 답하는 셈이고, 미리 접수해 두는 것 자체를 막는다.
+     *
+     * <p><b>최종 판정은 여기가 아니다.</b> 이 조회는 스냅샷이라 같은 순간에 들어온 두 요청을
+     * 갈라내지 못한다. 판정은 {@code agent_dispatches} 의 {@code uk_dispatch_active_device} 가
+     * 하고, 여기서는 요청을 받자마자 빠르게 되돌려 주기 위한 사전 확인으로만 쓴다.
      */
-    public boolean hasActiveTaskOnDevice(long deviceId) {
+    public boolean isDeviceOccupied(long deviceId) {
         return dsl.fetchExists(
                 dsl.selectFrom(TASKS)
                         .where(TASKS.DEVICE_ID.eq(deviceId))
-                        .and(TASKS.STATUS.in(ACTIVE_STATUSES)));
+                        .and(TASKS.STATUS.in(TaskStatus.QUEUED.name(), TaskStatus.RUNNING.name())));
+    }
+
+    /**
+     * 이 기기를 기다리고 있는 작업. 오래 기다린 것부터 돌려준다. (WBS W1-04)
+     *
+     * <p>기기가 꺼져 있는 동안 접수된 작업은 전달을 만들지 않고 {@code WAITING_FOR_DEVICE} 로
+     * 남는다. Agent 가 다시 붙어 READY 를 보고할 때 이 목록을 꺼내 내보낸다.
+     *
+     * <p>전달을 미리 만들어 두지 않는 이유는 {@code agent_dispatches.expires_at} 때문이다.
+     * 기기가 언제 켜질지 모르는데 기한을 먼저 박으면 켜지기도 전에 만료된다.
+     */
+    public List<TasksRecord> findWaitingForDevice(long deviceId, int limit) {
+        return dsl.selectFrom(TASKS)
+                .where(TASKS.DEVICE_ID.eq(deviceId))
+                .and(TASKS.STATUS.eq(TaskStatus.WAITING_FOR_DEVICE.name()))
+                .orderBy(TASKS.CREATED_AT.asc(), TASKS.ID.asc())
+                .limit(limit)
+                .fetch();
     }
 
     /**

@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -24,6 +25,7 @@ import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.dispatch.AgentDispatchRepository;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
+import com.likelion.slash.task.TaskService;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -83,6 +85,7 @@ class AgentWebSocketHandlerTest {
     private final DeviceRepository deviceRepository = mock(DeviceRepository.class);
     private final DeviceCapabilityRepository deviceCapabilityRepository = mock(DeviceCapabilityRepository.class);
     private final AgentDispatchRepository agentDispatchRepository = mock(AgentDispatchRepository.class);
+    private final TaskService taskService = mock(TaskService.class);
 
     private final AgentWebSocketHandler handler = new AgentWebSocketHandler(
             objectMapper,
@@ -90,7 +93,8 @@ class AgentWebSocketHandlerTest {
             new AgentSignatureVerifier(),
             deviceRepository,
             deviceCapabilityRepository,
-            agentDispatchRepository);
+            agentDispatchRepository,
+            taskService);
 
     private KeyPair 기기_키쌍;
     private WebSocketSession session;
@@ -355,6 +359,26 @@ class AgentWebSocketHandlerTest {
 
         verify(deviceCapabilityRepository).replaceAll(eq(기기_PK), any());
         verify(deviceRepository).updateConnectionState(기기_PK, DeviceStatus.READY);
+
+        // PC 가 꺼져 있는 동안 접수된 작업이 나가는 지점이 여기다. (WBS W1-04)
+        verify(taskService).dispatchWaiting(기기_PK);
+    }
+
+    @Test
+    @DisplayName("밀린 작업을 내보내다 실패해도 READY 자체는 성공으로 둔다")
+    void 대기작업_전달_실패가_연결을_끊지_않는다() throws Exception {
+        인증한다();
+        given(taskService.dispatchWaiting(기기_PK)).willThrow(new IllegalStateException("전달 실패"));
+
+        보낸다(프레임("READY",
+                "\"maxConcurrentTasks\":1",
+                "\"supportedTaskTypes\":[\"SYSTEM_STATUS\"]",
+                "\"searchFolders\":[]",
+                "\"projectWorkspaces\":[]"));
+
+        // 기기는 이미 작업을 받을 수 있는 상태다. 밀린 작업 하나 때문에 연결을 끊을 이유가 없다.
+        verify(deviceRepository).updateConnectionState(기기_PK, DeviceStatus.READY);
+        assertThat(session.isOpen()).isTrue();
     }
 
     @Test

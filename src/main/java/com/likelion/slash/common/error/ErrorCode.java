@@ -68,6 +68,16 @@ public enum ErrorCode {
     /** 작업 실행 기한 만료 */
     TASK_EXPIRED(HttpStatus.UNPROCESSABLE_ENTITY, "작업 실행 기한이 지났습니다."),
 
+    /**
+     * 무슨 요청인지 알아내지 못함. (NLU {@code decision=UNSUPPORTED})
+     *
+     * <p>{@link #TASK_TYPE_NOT_SUPPORTED} 와 다르다 — 저쪽은 요청은 알아들었는데 그 PC 가
+     * 못 하는 경우이고, 이쪽은 요청 자체를 알아듣지 못한 경우다.
+     *
+     * <p>이름은 참조 구현({@code mock-api/src/taskOrchestrator.ts})이 쓰는 값을 그대로 따른다.
+     */
+    UNRECOGNIZED_COMMAND(HttpStatus.UNPROCESSABLE_ENTITY, "무엇을 도와드릴지 알아내지 못했습니다."),
+
     // ---------------------------------------------------------------------
     // Agent 가 보고하는 실행 실패 (RESULT.error.code / ACK.reasonCode)
     // ---------------------------------------------------------------------

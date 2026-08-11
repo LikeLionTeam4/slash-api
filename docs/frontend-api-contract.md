@@ -5,8 +5,8 @@ slash-api 를 호출할 때 지켜야 하는 공통 규약입니다.
 
 | | |
 |---|---|
-| 버전 | v0.2 |
-| 기준일 | 2026-08-05 |
+| 버전 | v0.3 |
+| 기준일 | 2026-08-10 |
 | 담당 | 코어 API (김강찬) |
 
 > 값이 정해지지 않은 항목은 `TBD` 로 표시했습니다. 확정될 때마다 이 문서를 갱신합니다.
@@ -21,7 +21,10 @@ slash-api 를 호출할 때 지켜야 하는 공통 규약입니다.
 | 동작 중 | `GET /api/v1/me` |
 | **동작 중** | `POST /api/v1/pairing-requests` — PC 등록 코드 발급 |
 | **동작 중** | `GET /api/v1/pairing-requests/{id}` — 등록 진행 상태 |
-| 계약만 확정 | 기기 API (W1-03), 작업 API (W1-04) |
+| **동작 중** | `GET /api/v1/task-types` — 작업 유형 기준 목록 |
+| **동작 중** | `POST /api/v1/requests` — 작업 접수 |
+| **동작 중** | `GET /api/v1/tasks/{taskId}` — 작업 상태·결과 조회 |
+| 계약만 확정 | 기기 API (W1-03) |
 
 ### PC 등록 화면 (W1-02)
 
@@ -52,6 +55,60 @@ GET  /api/v1/pairing-requests/{id}       → 200
 
 > Agent 가 호출하는 `POST /api/v1/agent/pair`·`/pair/verify`·`/sessions/refresh` 는
 > 프론트가 부를 일이 없습니다. 사용자 인증 없이 Ed25519 서명으로 동작하는 별도 경로입니다.
+
+### 입력창 화면 (W1-04)
+
+**입력창의 한 줄을 그대로 보내세요.** 슬래시 명령인지 자연어인지 프론트가 가르지 않습니다.
+`/status` 같은 명령을 분해하는 것도, 어떤 작업인지 알아내는 것도 서버와 NLU 가 합니다.
+
+```
+POST /api/v1/requests                    → 202
+Idempotency-Key: {UUID v4}
+{ "text": "/status", "selectedDeviceId": null }
+
+{ "data": { "taskId": "9c1e…", "status": "QUEUED",
+            "statusUrl": "/api/v1/tasks/9c1e…" } }
+
+GET  /api/v1/tasks/{taskId}              → 200
+{ "data": { "taskId": "9c1e…", "status": "SUCCEEDED",
+            "taskType": "SYSTEM_STATUS", "processingRoute": "LOCAL_AGENT",
+            "deviceId": "e0d6…", "inputText": "/status",
+            "parameters": { … }, "result": { … }, "errorCode": null,
+            "correlationId": "…", "createdAt": "…", "updatedAt": "…",
+            "completedAt": "…" } }
+```
+
+`selectedDeviceId` 는 **비워도 됩니다.** 비우면 등록된 PC 중에서 서버가 고르되 **연결돼 있는
+것을 먼저** 고릅니다. PC 를 고르는 화면이 아직 없다면 그냥 생략하세요.
+
+접수 응답의 `statusUrl` 을 **2초 간격으로 폴링**해 주세요. 사용자 WSS 로 밀어 주는 것은
+다음 단계입니다. 상태가 `SUCCEEDED`·`FAILED`·`EXPIRED` 중 하나가 되면 멈추면 됩니다.
+
+#### 상태값
+
+| status | 뜻 | 화면 |
+|---|---|---|
+| `ANALYZING` | 무슨 요청인지 분석 중 | 진행 표시 |
+| `NEEDS_CLARIFICATION` | 되물어야 함 | `question` 을 보여주고 다시 입력받기 |
+| `WAITING_FOR_DEVICE` | **PC 가 꺼져 있어 대기 중** | "PC 가 켜지면 실행됩니다" |
+| `QUEUED` | PC 로 보냈고 수락 대기 | 진행 표시 |
+| `RUNNING` | 실행 중 | 진행 표시 |
+| `SUCCEEDED` | 완료 | `result` 표시 |
+| `FAILED` / `EXPIRED` | 실패·기한 만료 | `errorCode` 로 안내 |
+
+> **`WAITING_FOR_DEVICE` 를 오류로 다루지 마세요.** PC 가 꺼져 있어도 요청은 정상 접수됩니다.
+> 사용자가 PC 를 켜면 그때 실행되고 상태가 알아서 넘어갑니다. 이게 데스크톱 앱으로는 안 되는
+> 동작이라 시연에서 보여줄 장면이기도 합니다.
+
+> `POST` 응답의 `status` 는 **고정값이 아닙니다.** 접수 시점에 이미 정해진 실제 상태가 옵니다.
+> PC 가 붙어 있으면 `QUEUED`, 꺼져 있으면 `WAITING_FOR_DEVICE`, 못 알아들었으면 `FAILED` 입니다.
+
+#### 지금 되는 명령
+
+`/status` (시스템 상태) 하나가 종단까지 동작합니다. `/file` 은 검색 폴더를 저장하는 표가 아직
+없어 대기 중이고, `/weather`·`/summary` 는 각각 외부 API·LLM 연결이 남아 있어 지금은
+`UPSTREAM_UNAVAILABLE`·`LLM_NOT_READY` 로 마감됩니다. **화면은 네 개를 다 만들어 두셔도
+됩니다** — 오류 코드로 구분해 안내만 다르게 하면 붙는 대로 그대로 동작합니다.
 
 **Cognito 값이 아직 없어도 로컬에서는 로그인 이후 화면을 개발할 수 있습니다.**
 [5.1 로컬 개발용 임시 인증](#51-로컬-개발용-임시-인증)을 보세요.
@@ -167,6 +224,7 @@ GET  /api/v1/pairing-requests/{id}       → 200
 | `DEVICE_BUSY` | 409 | 다른 작업 실행 중. 잠시 후 재시도 |
 | `TASK_TYPE_NOT_SUPPORTED` | 422 | 이 PC 가 지원하지 않는 기능 |
 | `TASK_EXPIRED` | 422 | 실행 기한 만료 |
+| `UNRECOGNIZED_COMMAND` | 422 | **무슨 요청인지 알아내지 못함.** 다시 입력 유도 |
 | `SEARCH_FOLDER_NOT_FOUND` | 422 | 검색 폴더 재선택 |
 | `WORKSPACE_NOT_FOUND` | 422 | P1 |
 | `CODE_AGENT_NOT_CONFIGURED` | 422 | P1 |

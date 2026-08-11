@@ -1,0 +1,93 @@
+package com.likelion.slash.task;
+
+import com.likelion.slash.common.enums.ProcessingRoute;
+import com.likelion.slash.common.enums.TaskStatus;
+import com.likelion.slash.common.enums.TaskType;
+import com.likelion.slash.common.error.ErrorCode;
+import org.jooq.JSONB;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * 상태 전이와 타임라인 기록을 한 트랜잭션으로 묶는다. (WBS W1-04)
+ *
+ * <p>둘을 따로 하면 전이는 됐는데 기록이 없거나 그 반대인 상태가 생긴다. 화면의 진행 표시가
+ * 곧 이 타임라인이라 어긋나면 사용자에게 그대로 보인다.
+ *
+ * <p><b>접수 흐름 전체를 한 트랜잭션으로 묶지 않는 이유</b> — 그 안에 NLU 호출(최대 2초)이
+ * 들어 있다. 외부 호출을 트랜잭션 안에 두면 그동안 {@code tasks} 행 잠금과 커넥션을 함께
+ * 붙잡는다. Pod 당 커넥션이 10개뿐이라(Hikari 설정) 몇 건만 겹쳐도 말라붙는다.
+ *
+ * <p>전이가 거짓을 돌려주면 이미 다른 상태로 넘어간 작업이다. Agent 의 RESULT 가 먼저
+ * 도착한 경우가 여기 해당하며, 나중에 온 쪽이 조용히 물러난다.
+ */
+@Component
+public class TaskStateWriter {
+
+    private static final Logger log = LoggerFactory.getLogger(TaskStateWriter.class);
+
+    private final TaskRepository taskRepository;
+    private final TaskEventRepository taskEventRepository;
+
+    public TaskStateWriter(TaskRepository taskRepository, TaskEventRepository taskEventRepository) {
+        this.taskRepository = taskRepository;
+        this.taskEventRepository = taskEventRepository;
+    }
+
+    /** 접수 직후의 최초 기록. 아직 전이가 아니므로 이전 상태는 없다. */
+    @Transactional
+    public void recordCreated(long taskId, String message) {
+        taskEventRepository.append(taskId, null, TaskStatus.CREATED, null, message);
+    }
+
+    /**
+     * 분석 결과를 반영하고 다음 상태로 옮긴다.
+     *
+     * @return 반영 여부. 거짓이면 이미 {@code ANALYZING} 이 아니다.
+     */
+    @Transactional
+    public boolean applyAnalysisAndMove(long taskId,
+                                        TaskType taskType,
+                                        ProcessingRoute processingRoute,
+                                        Long deviceId,
+                                        JSONB parameters,
+                                        String requestSummary,
+                                        TaskStatus next,
+                                        String reasonCode,
+                                        String message) {
+
+        if (!taskRepository.applyAnalysis(taskId, taskType, processingRoute, deviceId, parameters, requestSummary)) {
+            log.debug("분석 결과를 반영하지 못했다. 이미 다른 상태다. taskId={}", taskId);
+            return false;
+        }
+        if (!taskRepository.transition(taskId, TaskStatus.ANALYZING, next)) {
+            return false;
+        }
+        taskEventRepository.append(taskId, TaskStatus.ANALYZING, next, reasonCode, message);
+        return true;
+    }
+
+    /** 중간 상태로 옮기고 기록한다. */
+    @Transactional
+    public boolean move(long taskId, TaskStatus from, TaskStatus to, String reasonCode, String message) {
+        if (!taskRepository.transition(taskId, from, to)) {
+            log.debug("상태 전이 실패. 이미 {} 가 아니다. taskId={}", from, taskId);
+            return false;
+        }
+        taskEventRepository.append(taskId, from, to, reasonCode, message);
+        return true;
+    }
+
+    /** 실패로 마감하고 기록한다. */
+    @Transactional
+    public boolean fail(long taskId, TaskStatus from, ErrorCode errorCode, String message) {
+        if (!taskRepository.finishWithError(taskId, from, TaskStatus.FAILED, errorCode)) {
+            log.debug("실패 마감을 반영하지 못했다. 이미 {} 가 아니다. taskId={}", from, taskId);
+            return false;
+        }
+        taskEventRepository.append(taskId, from, TaskStatus.FAILED, errorCode.name(), message);
+        return true;
+    }
+}

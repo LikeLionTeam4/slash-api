@@ -1,0 +1,368 @@
+package com.likelion.slash.task;
+
+import static com.likelion.slash.jooq.Tables.AGENT_DISPATCHES;
+import static com.likelion.slash.jooq.Tables.DEVICES;
+import static com.likelion.slash.jooq.Tables.TASKS;
+import static com.likelion.slash.support.TestFixtures.사용자;
+import static com.likelion.slash.support.TestFixtures.준비된_기기;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+
+import com.likelion.slash.auth.AuthenticatedUser;
+import com.likelion.slash.common.SlashTime;
+import com.likelion.slash.common.enums.DeviceStatus;
+import com.likelion.slash.common.enums.ProcessingRoute;
+import com.likelion.slash.common.enums.TaskStatus;
+import com.likelion.slash.common.error.ErrorCode;
+import com.likelion.slash.common.error.SlashException;
+import com.likelion.slash.dispatch.TaskDispatcher;
+import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.nlu.NluClient;
+import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
+import com.likelion.slash.nlu.dto.NluDecision;
+import com.likelion.slash.task.dto.CreateRequestRequest;
+import com.likelion.slash.task.dto.CreateRequestResponse;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.jooq.DSLContext;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * {@link TaskService} 확인. (WBS W1-04)
+ *
+ * <p>여기가 종단 경로의 분기점이다. 요청 하나가 어느 길로 가는지, 그리고 <b>갈 수 없을 때
+ * 어떻게 남는지</b>를 본다. 특히 PC 가 꺼져 있을 때 실패로 끝내지 않고 기다리는 것이
+ * 참조 구현과 다른 지점이라 명시적으로 확인한다.
+ *
+ * <p>NLU 와 전달은 대역으로 바꾼다. 둘 다 밖으로 나가는 호출이고 각자의 시험이 따로 있다.
+ */
+@SpringBootTest
+@Transactional
+class TaskServiceTest {
+
+    @Autowired
+    private TaskService taskService;
+
+    @Autowired
+    private TaskRepository taskRepository;
+
+    @Autowired
+    private DSLContext dsl;
+
+    @MockitoBean
+    private NluClient nluClient;
+
+    @MockitoBean
+    private TaskDispatcher taskDispatcher;
+
+    private AuthenticatedUser 사용자;
+
+    @BeforeEach
+    void setUp() {
+        long userId = 사용자(dsl);
+        this.사용자 = new AuthenticatedUser(
+                userId, UUID.randomUUID(), "tester@example.com", "시험 사용자",
+                "Asia/Seoul", "ACTIVE", SlashTime.now());
+    }
+
+    // ------------------------------------------------------------------
+    // 로컬 실행 경로
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("PC 가 연결돼 있으면 QUEUED 로 두고 곧바로 내보낸다")
+    void 연결된_PC_로_바로_내보낸다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+        verify(taskDispatcher).dispatch(any(), anyLong());
+
+        TasksRecord 작업 = 작업조회(응답.taskId());
+        assertThat(작업.getTaskType()).isEqualTo("SYSTEM_STATUS");
+        assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT.name());
+        assertThat(작업.getDeviceId()).isEqualTo(deviceId);
+    }
+
+    @Test
+    @DisplayName("PC 가 꺼져 있어도 요청을 받아 WAITING_FOR_DEVICE 로 남긴다")
+    void 꺼진_PC_의_요청도_받는다() {
+        기기상태를(준비된_기기(dsl, 사용자.id()), DeviceStatus.OFFLINE);
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.WAITING_FOR_DEVICE);
+
+        // 전달을 미리 만들지 않는다. 언제 켜질지 모르는데 기한을 먼저 박으면 켜지기 전에 만료된다.
+        verify(taskDispatcher, never()).dispatch(any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("PC 가 다시 붙으면 기다리던 작업을 내보낸다")
+    void 다시_붙으면_밀린_작업을_내보낸다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        기기상태를(deviceId, DeviceStatus.OFFLINE);
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        UUID taskId = taskService.accept(사용자, new CreateRequestRequest("/status", null), null).taskId();
+
+        int 내보낸건수 = taskService.dispatchWaiting(deviceId);
+
+        assertThat(내보낸건수).isEqualTo(1);
+        assertThat(작업조회(taskId).getStatus()).isEqualTo(TaskStatus.QUEUED.name());
+        verify(taskDispatcher).dispatch(any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("등록된 PC 가 없으면 실패로 마감한다")
+    void 등록된_PC_가_없으면_실패한다() {
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.DEVICE_NOT_READY.name());
+    }
+
+    @Test
+    @DisplayName("PC 가 꺼져 있으면 기다리는 작업이 있어도 새 요청을 받는다")
+    void 꺼진_PC_는_여러_건을_받아_둔다() {
+        기기상태를(준비된_기기(dsl, 사용자.id()), DeviceStatus.OFFLINE);
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+        CreateRequestResponse 두번째 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        // 꺼진 PC 는 아무것도 실행 중이 아니다. 여기서 막으면 미리 접수해 두는 것 자체가 안 된다.
+        assertThat(두번째.status()).isEqualTo(TaskStatus.WAITING_FOR_DEVICE);
+    }
+
+    @Test
+    @DisplayName("밀린 작업이 여러 건이어도 한 번에 한 건만 내보낸다")
+    void 밀린_작업은_한_건씩_내보낸다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        기기상태를(deviceId, DeviceStatus.OFFLINE);
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+        taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        // uk_dispatch_active_device 가 기기당 활성 전달 한 건만 허용한다.
+        assertThat(taskService.dispatchWaiting(deviceId)).isEqualTo(1);
+        assertThat(taskService.dispatchWaiting(deviceId)).isZero();
+    }
+
+    @Test
+    @DisplayName("사전 확인을 지나고 나서 기기를 뺏기면 DEVICE_BUSY 로 마감한다")
+    void 전달_경쟁에서_지면_마감한다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        // isDeviceOccupied 는 조회 시점의 스냅샷이라 동시에 들어온 두 요청을 갈라내지 못한다.
+        // 최종 판정은 uk_dispatch_active_device 가 하고, 진 쪽은 여기서 예외를 받는다.
+        given(taskDispatcher.dispatch(any(), anyLong()))
+                .willThrow(new DuplicateKeyException("uk_dispatch_active_device"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        // 전달이 없는데 QUEUED 로 남으면 ACK·RESULT 를 영영 못 받아 무한 대기로 보인다.
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        TasksRecord 작업 = 작업조회(응답.taskId());
+        assertThat(작업.getStatus()).isEqualTo(TaskStatus.FAILED.name());
+        assertThat(작업.getErrorCode()).isEqualTo(ErrorCode.DEVICE_BUSY.name());
+        assertThat(dsl.fetchCount(AGENT_DISPATCHES, AGENT_DISPATCHES.DEVICE_ID.eq(deviceId))).isZero();
+    }
+
+    @Test
+    @DisplayName("밀린 작업을 내보내다 기기를 뺏겨도 QUEUED 로 방치하지 않는다")
+    void 대기작업_전달_경쟁에서_지면_마감한다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        기기상태를(deviceId, DeviceStatus.OFFLINE);
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        UUID taskId = taskService.accept(사용자, new CreateRequestRequest("/status", null), null).taskId();
+        given(taskDispatcher.dispatch(any(), anyLong()))
+                .willThrow(new DuplicateKeyException("uk_dispatch_active_device"));
+
+        assertThat(taskService.dispatchWaiting(deviceId)).isZero();
+
+        TasksRecord 작업 = 작업조회(taskId);
+        assertThat(작업.getStatus()).isEqualTo(TaskStatus.FAILED.name());
+        assertThat(작업.getErrorCode()).isEqualTo(ErrorCode.DEVICE_BUSY.name());
+    }
+
+    @Test
+    @DisplayName("PC 가 이미 다른 작업을 하고 있으면 받지 않는다 — P0 는 기기당 1건")
+    void 실행_중인_PC_는_받지_않는다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        com.likelion.slash.support.TestFixtures.작업(dsl, 사용자.id(), deviceId, TaskStatus.RUNNING.name());
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.DEVICE_BUSY.name());
+    }
+
+    // ------------------------------------------------------------------
+    // 분석 결과별 분기
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("알아듣지 못한 요청은 UNRECOGNIZED_COMMAND 로 마감한다")
+    void 못_알아들으면_실패한다() {
+        NLU가(new NluAnalyzeResponse("r", NluDecision.UNSUPPORTED, null, Map.of(), List.of(), null, 0.1, "RULE_KIWI"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("음악 틀어줘", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.UNRECOGNIZED_COMMAND.name());
+    }
+
+    @Test
+    @DisplayName("되물어야 하면 NEEDS_CLARIFICATION 으로 두고 질문을 남긴다")
+    void 되물을_때는_질문을_남긴다() {
+        NLU가(new NluAnalyzeResponse("r", NluDecision.CLARIFY, null, Map.of(),
+                List.of("location"), "어느 지역 날씨를 알려드릴까요?", 0.6, "RULE_KIWI"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("날씨 알려줘", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.NEEDS_CLARIFICATION);
+    }
+
+    @Test
+    @DisplayName("NLU 가 필수 입력값 누락을 알리면 되묻는다")
+    void 필수값이_비면_되묻는다() {
+        NLU가(new NluAnalyzeResponse("r", NluDecision.TASK, "TEXT_SUMMARY", Map.of(),
+                List.of("text"), "무엇을 요약할까요?", 0.9, "SLASH"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/summary", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.NEEDS_CLARIFICATION);
+    }
+
+    @Test
+    @DisplayName("서버가 채우는 값(searchFolderId)이 비었다고 되묻지 않는다")
+    void 서버가_채우는_값으로는_되묻지_않는다() {
+        준비된_기기(dsl, 사용자.id());
+        // NLU 는 searchFolderId 를 누락값으로 보고하지 않지만, 보고하더라도 되물으면 안 된다.
+        NLU가(new NluAnalyzeResponse("r", NluDecision.TASK, "FILE_SEARCH", Map.of("query", "보고서"),
+                List.of("searchFolderId"), null, 0.9, "SLASH"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/file 보고서", null), null);
+
+        assertThat(응답.status()).isNotEqualTo(TaskStatus.NEEDS_CLARIFICATION);
+    }
+
+    @Test
+    @DisplayName("NLU 를 부르지 못하면 NLU_UNAVAILABLE 로 마감한다")
+    void NLU_장애는_실패로_마감한다() {
+        given(nluClient.analyze(any(), any(), any())).willThrow(new SlashException(ErrorCode.NLU_UNAVAILABLE));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.NLU_UNAVAILABLE.name());
+    }
+
+    @Test
+    @DisplayName("아직 붙이지 않은 처리 경로는 있는 척하지 않고 실패로 마감한다")
+    void 아직_없는_경로는_실패로_마감한다() {
+        NLU가(new NluAnalyzeResponse("r", NluDecision.TASK, "WEATHER_LOOKUP", Map.of("location", "서울"),
+                List.of(), null, 0.95, "SLASH"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/weather 서울", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.UPSTREAM_UNAVAILABLE.name());
+    }
+
+    // ------------------------------------------------------------------
+    // 멱등
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("같은 키로 같은 요청을 다시 보내면 작업을 새로 만들지 않는다")
+    void 같은_키_같은_본문은_같은_작업이다() {
+        준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("SYSTEM_STATUS"));
+        CreateRequestRequest 요청 = new CreateRequestRequest("/status", null);
+
+        UUID 첫번째 = taskService.accept(사용자, 요청, "key-1").taskId();
+        UUID 두번째 = taskService.accept(사용자, 요청, "key-1").taskId();
+
+        assertThat(두번째).isEqualTo(첫번째);
+        assertThat(dsl.fetchCount(TASKS, TASKS.USER_ID.eq(사용자.id()))).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("같은 키에 다른 내용이 오면 거부한다")
+    void 같은_키_다른_본문은_거부한다() {
+        준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        taskService.accept(사용자, new CreateRequestRequest("/status", null), "key-2");
+
+        assertThatThrownBy(() ->
+                taskService.accept(사용자, new CreateRequestRequest("/file 보고서", null), "key-2"))
+                .isInstanceOf(SlashException.class)
+                .extracting(e -> ((SlashException) e).errorCode())
+                .isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT);
+    }
+
+    // ------------------------------------------------------------------
+    // 조회
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("남의 작업은 찾을 수 없다")
+    void 남의_작업은_보이지_않는다() {
+        준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("SYSTEM_STATUS"));
+        UUID taskId = taskService.accept(사용자, new CreateRequestRequest("/status", null), null).taskId();
+
+        AuthenticatedUser 남 = new AuthenticatedUser(사용자(dsl), UUID.randomUUID(), "other@example.com",
+                "남", "Asia/Seoul", "ACTIVE", SlashTime.now());
+
+        assertThatThrownBy(() -> taskService.findOwned(남, taskId))
+                .isInstanceOf(SlashException.class)
+                .extracting(e -> ((SlashException) e).errorCode())
+                .isEqualTo(ErrorCode.RESOURCE_NOT_FOUND);
+    }
+
+    // ------------------------------------------------------------------
+    // 보조
+    // ------------------------------------------------------------------
+
+    private void NLU가(NluAnalyzeResponse 응답) {
+        given(nluClient.analyze(any(), any(), any())).willReturn(응답);
+    }
+
+    private NluAnalyzeResponse 작업분석(String taskType) {
+        return new NluAnalyzeResponse("r", NluDecision.TASK, taskType, Map.of(), List.of(), null, 1.0, "SLASH");
+    }
+
+    private void 기기상태를(long deviceId, DeviceStatus status) {
+        dsl.update(DEVICES).set(DEVICES.STATUS, status.name()).where(DEVICES.ID.eq(deviceId)).execute();
+    }
+
+    private TasksRecord 작업조회(UUID publicId) {
+        return taskRepository.findByPublicIdAndUserId(publicId, 사용자.id()).orElseThrow();
+    }
+}
