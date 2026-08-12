@@ -269,6 +269,15 @@ public class TaskRepository {
     /**
      * 기한이 지난 미완료 작업을 만료로 마감한다. 배치가 주기적으로 호출한다.
      *
+     * <p><b>이 메서드는 브라우저에 알리지 않는다.</b> 다른 마감은 모두
+     * {@code TaskStateWriter} 를 거쳐 {@code TASK_STATUS_CHANGED} 와
+     * {@code TASK_RESULT_AVAILABLE} 을 함께 내보내는데, 여기는 한 문장으로 여러 행을 바꾸는
+     * 대량 UPDATE 라 그 경로를 타지 않는다. 이대로 배치를 붙이면 <b>만료된 작업의 화면이
+     * 새로고침 전까지 영영 "진행 중"에 머문다.</b> 사용자 눈에는 멈춘 것으로 보인다.
+     *
+     * <p>배치를 붙이는 쪽이 마감한 작업의 {@code user_id}·{@code public_id} 를 받아
+     * {@code UserEventPublisher} 로 알려야 한다. 지금은 호출자가 없어 드러나지 않는다.
+     *
      * @param createdBefore 이 시각 이전에 만들어진 미완료 작업을 대상으로 한다
      * @return 마감한 건수
      */

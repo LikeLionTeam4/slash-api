@@ -81,8 +81,12 @@ GET  /api/v1/tasks/{taskId}              → 200
 `selectedDeviceId` 는 **비워도 됩니다.** 비우면 등록된 PC 중에서 서버가 고르되 **연결돼 있는
 것을 먼저** 고릅니다. PC 를 고르는 화면이 아직 없다면 그냥 생략하세요.
 
-접수 응답의 `statusUrl` 을 **2초 간격으로 폴링**해 주세요. 사용자 WSS 로 밀어 주는 것은
-다음 단계입니다. 상태가 `SUCCEEDED`·`FAILED`·`EXPIRED` 중 하나가 되면 멈추면 됩니다.
+진행 상황은 **사용자 WSS 로 밀어 드립니다**(§7). `TASK_STATUS_CHANGED` 로 진행 표시를 바꾸고,
+`TASK_RESULT_AVAILABLE` 을 받으면 `statusUrl` 을 한 번 조회해 본문을 받으세요.
+
+**WSS 에 붙지 않았거나 끊긴 동안에는 `statusUrl` 을 2초 간격으로 폴링**해 주세요. WSS 는 빠른
+화면 반영이고 **진실은 REST** 라, 폴링만으로도 화면은 정상 동작합니다. 상태가
+`SUCCEEDED`·`FAILED`·`EXPIRED` 중 하나가 되면 멈추면 됩니다.
 
 #### 상태값
 
@@ -229,6 +233,13 @@ GET  /api/v1/tasks/{taskId}              → 200
 | `WORKSPACE_NOT_FOUND` | 422 | P1 |
 | `CODE_AGENT_NOT_CONFIGURED` | 422 | P1 |
 | `POLICY_DENIED` | 403 | 허용되지 않은 경로 또는 작업 |
+| `AGENT_REJECTED` | 422 | PC 가 작업을 받지 않음. 사유를 알 수 없을 때 옵니다 |
+| `AGENT_TASK_FAILED` | 422 | PC 에서 실행이 끝나지 못함. 사유를 알 수 없을 때 옵니다 |
+
+> **`AGENT_REJECTED`·`AGENT_TASK_FAILED` 는 마지막 수단입니다.** PC 가 사유를 함께 보내면
+> 위 표의 구체적인 코드(`TASK_TYPE_NOT_SUPPORTED`·`POLICY_DENIED` 등)로 옵니다. 사유가 없거나
+> 우리가 모르는 값일 때만 이 둘로 옵니다. 즉 **이 코드가 보이면 사용자에게 알려줄 원인이
+> 없다는 뜻**이므로, 원인을 짐작해 쓰지 말고 일반 실패 안내 + 재시도 유도로 처리하세요.
 
 ### 외부·내부 서비스
 
@@ -340,10 +351,33 @@ Cognito 로 바뀔 때 `Authorization` 헤더에 넣는 값의 출처만 교체�
 그래서 **30초·1회용 Ticket** 으로 접속합니다.
 
 ```
-1. POST /api/v1/ws/ticket      (Bearer 인증)  →  { "ticket": "..." }
-2. wss://{TBD}/ws/user?ticket=...             (30초 안에 접속)
+1. POST /api/v1/ws/ticket   (Bearer 인증)  →  201
+   { "ticket": "...", "expiresIn": 30, "wsUrl": "ws://localhost:8080/ws/user" }
+
+2. new WebSocket(`${wsUrl}?ticket=${ticket}`)     (expiresIn 안에 접속)
+
 3. 연결이 끊기면 1번부터 다시. Ticket 은 재사용할 수 없습니다.
 ```
+
+접속 주소를 코드에 박지 마세요. **`wsUrl` 을 그대로 쓰면 됩니다** — 환경마다 다릅니다.
+
+Ticket 이 만료됐거나 이미 쓰였으면 **종료 코드 4401** 로 끊깁니다. 이때는 표를 새로
+받아 다시 붙으세요. 재시도 간격을 두지 않으면 발급과 실패를 무한히 반복할 수 있습니다.
+
+### 받게 되는 이벤트
+
+| type | 담긴 것 | 화면 |
+|---|---|---|
+| `CONNECTED` | `connectionId`, `serverTime` | 접속 직후 서버가 먼저 보냅니다. 이걸 받아야 연결이 선 것입니다 |
+| `TASK_STATUS_CHANGED` | `taskId`, `from`, `to`, `occurredAt` | 진행 표시 갱신 |
+| `TASK_RESULT_AVAILABLE` | `taskId`, `status`, `resultPreview` | 이 신호를 받으면 `GET /api/v1/tasks/{taskId}` 로 본문을 받으세요 |
+| `PONG` | `sentAt` | `{"type":"PING"}` 을 보내면 돌아옵니다 |
+
+**Agent 채널과 형식이 다릅니다.** 이쪽에는 `schemaVersion`·`eventId` 같은 공통 필드가
+없습니다. 원장이 아니라 화면을 빠르게 반영하기 위한 알림이라서입니다.
+
+`resultPreview` 는 결과 앞 **200자**입니다. 결과는 64KB 까지 커질 수 있어 전체를 싣지
+않습니다. 실패로 끝났으면 `null` 입니다.
 
 WSS 는 화면을 빠르게 반영하기 위한 것이고,
 **신뢰할 수 있는 최종 상태는 REST 입니다.**

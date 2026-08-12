@@ -4,6 +4,7 @@ import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
+import com.likelion.slash.ws.UserEventPublisher;
 import org.jooq.JSONB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,10 +31,39 @@ public class TaskStateWriter {
 
     private final TaskRepository taskRepository;
     private final TaskEventRepository taskEventRepository;
+    private final UserEventPublisher userEvents;
 
-    public TaskStateWriter(TaskRepository taskRepository, TaskEventRepository taskEventRepository) {
+    public TaskStateWriter(TaskRepository taskRepository,
+                           TaskEventRepository taskEventRepository,
+                           UserEventPublisher userEvents) {
         this.taskRepository = taskRepository;
         this.taskEventRepository = taskEventRepository;
+        this.userEvents = userEvents;
+    }
+
+    /**
+     * 상태가 바뀐 것을 브라우저에 알린다.
+     *
+     * <p>타임라인 기록과 짝을 이룬다. 기록만 남기고 알리지 않으면 화면은 새로고침해야 따라온다.
+     *
+     * <p><b>알림 실패가 전이를 되돌리지 않는다.</b> 발행은 커밋 뒤에 일어나고
+     * ({@link UserEventPublisher}) 그 안에서 예외를 삼킨다. 화면이 늦게 따라오는 것은
+     * 불편이지만, 상태 전이가 취소되는 것은 사실이 달라지는 일이다.
+     *
+     * <p>여기서 작업을 한 번 더 읽는 것은 {@code user_id}·{@code public_id} 가 필요해서다.
+     * 상태가 바뀔 때만 일어나므로 잦은 조회가 아니다.
+     */
+    private void notifyStatusChanged(long taskId, TaskStatus from, TaskStatus to) {
+        taskRepository.findById(taskId).ifPresent(task ->
+                userEvents.taskStatusChanged(task.getUserId(), task.getPublicId(), from, to));
+    }
+
+    /** 최종 상태에 닿았음을 알린다. 프론트는 이 신호로 결과를 다시 조회한다. */
+    private void notifyFinished(long taskId, TaskStatus from, TaskStatus terminal) {
+        taskRepository.findById(taskId).ifPresent(task -> {
+            userEvents.taskStatusChanged(task.getUserId(), task.getPublicId(), from, terminal);
+            userEvents.taskResultAvailable(task.getUserId(), task.getPublicId(), terminal, task.getResult());
+        });
     }
 
     /** 접수 직후의 최초 기록. 아직 전이가 아니므로 이전 상태는 없다. */
@@ -66,6 +96,7 @@ public class TaskStateWriter {
             return false;
         }
         taskEventRepository.append(taskId, TaskStatus.ANALYZING, next, reasonCode, message);
+        notifyStatusChanged(taskId, TaskStatus.ANALYZING, next);
         return true;
     }
 
@@ -77,6 +108,7 @@ public class TaskStateWriter {
             return false;
         }
         taskEventRepository.append(taskId, from, to, reasonCode, message);
+        notifyStatusChanged(taskId, from, to);
         return true;
     }
 
@@ -112,6 +144,7 @@ public class TaskStateWriter {
             return false;
         }
         taskEventRepository.append(taskId, TaskStatus.RUNNING, TaskStatus.SUCCEEDED, null, message);
+        notifyFinished(taskId, TaskStatus.RUNNING, TaskStatus.SUCCEEDED);
         return true;
     }
 
@@ -137,6 +170,7 @@ public class TaskStateWriter {
             return false;
         }
         taskEventRepository.append(taskId, from, TaskStatus.FAILED, errorCode.name(), message);
+        notifyFinished(taskId, from, TaskStatus.FAILED);
         return true;
     }
 }
