@@ -12,6 +12,10 @@ package com.likelion.slash.ws;
  *
  * <p><b>진실 소스는 REST 다.</b> 연결이 끊긴 동안의 이벤트는 그냥 사라지고, 프론트는 재조회로
  * 따라잡는다. (docs/frontend-api-contract.md §7)
+ *
+ * <p><b>여기에는 실제로 내보내는 타입만 둔다.</b> 계약에 있더라도 아직 발행하지 않는 것을
+ * 미리 적어 두면 읽는 사람이 이미 되는 기능으로 오해한다. 기기 상태 알림처럼 뒤에 붙는 것은
+ * 발행 메서드·DTO 와 함께 그때 추가한다.
  */
 public final class UserProtocol {
 
@@ -23,9 +27,6 @@ public final class UserProtocol {
 
     /** 작업이 끝나 결과를 조회할 수 있다. */
     public static final String TYPE_TASK_RESULT_AVAILABLE = "TASK_RESULT_AVAILABLE";
-
-    /** 기기 연결 상태가 바뀌었다. */
-    public static final String TYPE_DEVICE_STATUS_CHANGED = "DEVICE_STATUS_CHANGED";
 
     public static final String TYPE_PING = "PING";
     public static final String TYPE_PONG = "PONG";
