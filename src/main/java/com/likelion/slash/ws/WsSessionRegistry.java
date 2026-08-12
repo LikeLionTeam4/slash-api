@@ -83,6 +83,25 @@ public class WsSessionRegistry {
         });
     }
 
+    /**
+     * 이 연결에 쓸 때 써야 하는 세션.
+     *
+     * <p><b>등록된 소켓에는 반드시 이것을 거쳐 써야 한다.</b> {@link #deliver} 는 감싼 세션으로
+     * 쓰는데, 핸들러가 원본 세션에 직접 쓰면 그 잠금을 우회한다. 데코레이터는 <b>자기를 거쳐 간
+     * 호출끼리만</b> 직렬화하기 때문이다. 그러면 브라우저의 PING 에 PONG 을 쓰는 그 순간
+     * Pub/Sub 스레드가 알림을 밀어 넣을 수 있고, 같은 소켓에 두 스레드가 동시에 쓰면
+     * 컨테이너가 {@code IllegalStateException} 을 던진다. 그것을 {@link #deliver} 가 끊긴
+     * 연결로 보고 소켓을 닫아, <b>PING 을 보냈다는 이유로 알림 채널이 죽는다.</b>
+     *
+     * <p>아직 등록 전이면 준 것을 그대로 돌려준다. 보관소에 없는 소켓은 다른 스레드가 찾을
+     * 길이 없으므로 경쟁 자체가 없다. Agent 의 CHALLENGE 처럼 인증 전에 나가는 프레임이
+     * 여기 해당한다.
+     */
+    public WebSocketSession guarded(WsTarget target, long targetId, WebSocketSession session) {
+        Map<String, WebSocketSession> held = sessions.get(new Key(target, targetId));
+        return held == null ? session : held.getOrDefault(session.getId(), session);
+    }
+
     /** 이 Pod 이 해당 대상의 연결을 들고 있는지. */
     public boolean holds(WsTarget target, long targetId) {
         Map<String, WebSocketSession> held = sessions.get(new Key(target, targetId));

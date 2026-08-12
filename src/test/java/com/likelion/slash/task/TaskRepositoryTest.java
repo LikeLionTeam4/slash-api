@@ -70,7 +70,14 @@ class TaskRepositoryTest {
         long userId = 사용자(dsl);
         var task = taskRepository.create(userId, "요청", null);
 
-        assertThat(taskRepository.transition(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING)).isTrue();
+        var 옮겨진_작업 = taskRepository.transition(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING);
+
+        // 부르는 쪽이 이 행을 그대로 쓴다(알림 발행). 다시 조회하지 않아도 되도록 갱신된 값이어야 한다.
+        assertThat(옮겨진_작업).isPresent();
+        assertThat(옮겨진_작업.orElseThrow().getStatus()).isEqualTo(TaskStatus.ANALYZING.name());
+        assertThat(옮겨진_작업.orElseThrow().getUserId()).isEqualTo(userId);
+        assertThat(옮겨진_작업.orElseThrow().getPublicId()).isNotNull();
+
         assertThat(taskRepository.findById(task.getId()).orElseThrow().getStatus())
                 .isEqualTo(TaskStatus.ANALYZING.name());
     }
@@ -95,9 +102,10 @@ class TaskRepositoryTest {
         // 다른 요청이 먼저 ANALYZING 으로 옮긴 상황
         taskRepository.transition(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING);
 
-        boolean 반영됨 = taskRepository.transition(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING);
+        var 반영됨 = taskRepository.transition(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING);
 
-        assertThat(반영됨).isFalse();
+        // 비어 있어야 한다. 행을 돌려주면 부르는 쪽이 일어나지도 않은 전이를 알린다.
+        assertThat(반영됨).isEmpty();
     }
 
     @Test
@@ -118,10 +126,13 @@ class TaskRepositoryTest {
         long userId = 사용자(dsl);
         long taskId = 작업(dsl, userId, null, TaskStatus.RUNNING.name());
 
-        boolean 반영됨 = taskRepository.succeed(taskId, TaskStatus.RUNNING,
+        var 반영됨 = taskRepository.succeed(taskId, TaskStatus.RUNNING,
                 JSONB.valueOf("{\"temperature\":29}"));
 
-        assertThat(반영됨).isTrue();
+        // 돌려준 행에 방금 쓴 결과가 담겨 있어야 한다. 결과 미리보기를 여기서 만든다.
+        assertThat(반영됨).isPresent();
+        assertThat(반영됨.orElseThrow().getResult().data()).contains("temperature");
+
         var 마감된_작업 = taskRepository.findById(taskId).orElseThrow();
         assertThat(마감된_작업.getStatus()).isEqualTo(TaskStatus.SUCCEEDED.name());
         assertThat(마감된_작업.getCompletedAt()).isNotNull();
@@ -134,10 +145,13 @@ class TaskRepositoryTest {
         long userId = 사용자(dsl);
         long taskId = 작업(dsl, userId, null, TaskStatus.RUNNING.name());
 
-        boolean 반영됨 = taskRepository.finishWithError(taskId, TaskStatus.RUNNING,
+        var 반영됨 = taskRepository.finishWithError(taskId, TaskStatus.RUNNING,
                 TaskStatus.FAILED, ErrorCode.NLU_UNAVAILABLE);
 
-        assertThat(반영됨).isTrue();
+        // 실패 마감이므로 돌려준 행의 결과도 비어 있어야 한다. (resultPreview 가 null 로 나가는 근거)
+        assertThat(반영됨).isPresent();
+        assertThat(반영됨.orElseThrow().getResult()).isNull();
+
         var 마감된_작업 = taskRepository.findById(taskId).orElseThrow();
         assertThat(마감된_작업.getStatus()).isEqualTo(TaskStatus.FAILED.name());
         assertThat(마감된_작업.getResult()).isNull();

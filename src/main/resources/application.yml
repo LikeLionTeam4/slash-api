@@ -124,7 +124,14 @@ slash:
 
   websocket:
     # 사용자 WSS Ticket 30초·1회용 (문서 3.4.2)
+    #
+    # 브라우저 WebSocket API 는 Authorization 헤더를 붙일 수 없어 자격이 URL 에 실린다.
+    # URL 은 프록시 접근 로그에 남으므로 Access Token 을 그대로 쓸 수 없다. 짧게 두는 것이
+    # 이 값의 존재 이유이니 늘릴 때는 로그에 남는 시간이 늘어난다는 것을 함께 본다.
     ticket-ttl: 30s
+
+    # 접속표를 받은 브라우저에게 알려줄 WSS 주소. 환경마다 다르다.
+    ws-url: ${USER_WS_URL:ws://localhost:8080/ws/user}
 
   dispatch:
     # 전달 기한. Agent 는 이 시각이 지난 TASK 를 실행하지 않는다. (메시지 스펙 §5)

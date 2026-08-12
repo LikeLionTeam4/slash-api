@@ -30,7 +30,11 @@ import org.springframework.stereotype.Repository;
  *   <li>{@code WHERE status = 기대값} 으로 DB 에서 한 번 더 비교한다 (compare-and-set)</li>
  * </ol>
  * 두 번째가 없으면 두 요청이 동시에 같은 Task 를 옮길 때 나중 것이 앞선 전이를 덮어쓴다.
- * 반환값이 거짓이면 다른 곳에서 먼저 상태를 바꾼 것이므로 서비스는 409 로 응답한다. (문서 3.10)
+ * 반환값이 비어 있으면 다른 곳에서 먼저 상태를 바꾼 것이므로 서비스는 409 로 응답한다. (문서 3.10)
+ *
+ * <p>전이 메서드는 성공 여부만이 아니라 <b>갱신된 행을 함께 돌려준다</b>({@code RETURNING}).
+ * 부르는 쪽은 대개 바로 뒤에 {@code user_id}·{@code public_id}·{@code result} 가 필요한데,
+ * 다시 조회하면 질의가 하나 늘 뿐 아니라 그 사이에 행이 또 바뀔 수 있다.
  *
  * <p>상태 전이와 {@code task_events} 기록은 반드시 같은 트랜잭션에서 수행한다.
  * {@link TaskEventRepository#append} 를 참고한다.
@@ -205,9 +209,9 @@ public class TaskRepository {
      * <p>최종 상태는 결과나 오류 코드를 함께 써야 {@code ck_tasks_completed_at} 을 만족하므로
      * {@link #succeed} · {@link #finishWithError} 를 쓴다.
      *
-     * @return 반영 여부. 거짓이면 현재 상태가 {@code expected} 가 아니다.
+     * @return 갱신된 행. 비어 있으면 현재 상태가 {@code expected} 가 아니다.
      */
-    public boolean transition(long id, TaskStatus expected, TaskStatus next) {
+    public Optional<TasksRecord> transition(long id, TaskStatus expected, TaskStatus next) {
         if (next.isTerminal()) {
             throw new IllegalArgumentException(
                     "최종 상태로의 전이는 succeed·finishWithError 를 사용합니다. next=" + next);
@@ -219,7 +223,8 @@ public class TaskRepository {
                 .set(TASKS.VERSION, TASKS.VERSION.plus(1))
                 .where(TASKS.ID.eq(id))
                 .and(TASKS.STATUS.eq(expected.name()))
-                .execute() == 1;
+                .returning()
+                .fetchOptional();
     }
 
     /**
@@ -227,8 +232,10 @@ public class TaskRepository {
      *
      * <p>{@code result} 는 64KB 를 넘을 수 없다. ({@code ck_tasks_result_size})
      * Agent 가 이미 {@code limit}·{@code truncated} 로 줄여 보내지만 상한을 넘으면 DB 가 거부한다.
+     *
+     * @return 갱신된 행. 비어 있으면 현재 상태가 {@code expected} 가 아니다.
      */
-    public boolean succeed(long id, TaskStatus expected, JSONB result) {
+    public Optional<TasksRecord> succeed(long id, TaskStatus expected, JSONB result) {
         requireAllowed(expected, TaskStatus.SUCCEEDED);
 
         return dsl.update(TASKS)
@@ -238,7 +245,8 @@ public class TaskRepository {
                 .set(TASKS.VERSION, TASKS.VERSION.plus(1))
                 .where(TASKS.ID.eq(id))
                 .and(TASKS.STATUS.eq(expected.name()))
-                .execute() == 1;
+                .returning()
+                .fetchOptional();
     }
 
     /**
@@ -248,8 +256,12 @@ public class TaskRepository {
      * 부분 결과가 남아 있어도 실패로 마감할 때는 지운다.
      *
      * @param terminal {@link TaskStatus#FAILED} 또는 {@link TaskStatus#EXPIRED}
+     * @return 갱신된 행. 비어 있으면 현재 상태가 {@code expected} 가 아니다.
      */
-    public boolean finishWithError(long id, TaskStatus expected, TaskStatus terminal, ErrorCode errorCode) {
+    public Optional<TasksRecord> finishWithError(long id,
+                                                 TaskStatus expected,
+                                                 TaskStatus terminal,
+                                                 ErrorCode errorCode) {
         if (terminal != TaskStatus.FAILED && terminal != TaskStatus.EXPIRED) {
             throw new IllegalArgumentException("실패 마감은 FAILED·EXPIRED 만 가능합니다. terminal=" + terminal);
         }
@@ -263,11 +275,21 @@ public class TaskRepository {
                 .set(TASKS.VERSION, TASKS.VERSION.plus(1))
                 .where(TASKS.ID.eq(id))
                 .and(TASKS.STATUS.eq(expected.name()))
-                .execute() == 1;
+                .returning()
+                .fetchOptional();
     }
 
     /**
      * 기한이 지난 미완료 작업을 만료로 마감한다. 배치가 주기적으로 호출한다.
+     *
+     * <p><b>이 메서드는 브라우저에 알리지 않는다.</b> 다른 마감은 모두
+     * {@code TaskStateWriter} 를 거쳐 {@code TASK_STATUS_CHANGED} 와
+     * {@code TASK_RESULT_AVAILABLE} 을 함께 내보내는데, 여기는 한 문장으로 여러 행을 바꾸는
+     * 대량 UPDATE 라 그 경로를 타지 않는다. 이대로 배치를 붙이면 <b>만료된 작업의 화면이
+     * 새로고침 전까지 영영 "진행 중"에 머문다.</b> 사용자 눈에는 멈춘 것으로 보인다.
+     *
+     * <p>배치를 붙이는 쪽이 마감한 작업의 {@code user_id}·{@code public_id} 를 받아
+     * {@code UserEventPublisher} 로 알려야 한다. 지금은 호출자가 없어 드러나지 않는다.
      *
      * @param createdBefore 이 시각 이전에 만들어진 미완료 작업을 대상으로 한다
      * @return 마감한 건수
