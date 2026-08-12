@@ -5,6 +5,7 @@ import com.likelion.slash.common.error.ApiAuthenticationEntryPoint;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -35,13 +36,39 @@ public class SecurityConfig {
             "/api/v1/agent/pair/verify",
             // 기기 Token 재발급도 사용자 인증이 아니라 기기 서명으로 증명한다. (메시지 스펙 §8.1 3단계)
             "/api/v1/agent/sessions/refresh",
-            // WSS 는 접속 시점에 아직 누구인지 모른다. 인증을 프로토콜 안에서 처리한다.
-            // Agent 는 도전값 서명(3.4.2), 사용자는 30초·1회용 Ticket 으로 검증한다.
-            // 검증 전에는 소켓이 보관소에 등록되지 않아 어떤 프레임도 나가지 않는다.
-            "/ws/**",
     };
 
+    /**
+     * WSS 전용 체인. {@code /ws/**}는 별도 체인으로 완전히 분리한다 — 같은 체인에 두고
+     * {@code authorizeHttpRequests}만 permitAll 해서는 부족하다. {@code oauth2ResourceServer}의
+     * Bearer 토큰 필터는 경로 인가 규칙과 무관하게 {@code Authorization: Bearer} 헤더가 있으면
+     * 무조건 JWT로 파싱을 시도하고, 실패하면 그 필터 안에서 바로 401을 내버린다 — permitAll이
+     * 적용되는 authorizeHttpRequests 단계까지 가지도 못한다. (이슈 #15)
+     *
+     * <p>Agent는 기기 Token을 정확히 그 헤더(Authorization: Bearer)로 보낸다({@code /ws/agent}
+     * 핸드셰이크, {@link com.likelion.slash.ws.AgentWebSocketHandler}) — Cognito가 발급한 JWT가
+     * 아니므로 실제 Cognito 검증을 켜는 순간(로컬 임시 인증이 꺼지는 순간) 핸드셰이크 자체가
+     * 401로 끊긴다. 인증은 이미 프로토콜 안(도전값 서명·접속표)에서 하기로 설계되어 있으므로,
+     * 이 체인에는 애초에 oauth2ResourceServer를 붙이지 않는다.
+     */
     @Bean
+    @Order(1)
+    SecurityFilterChain webSocketSecurityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .securityMatcher("/ws/**")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .httpBasic(basic -> basic.disable())
+                .formLogin(form -> form.disable())
+                .logout(logout -> logout.disable())
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+
+        return http.build();
+    }
+
+    @Bean
+    @Order(2)
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             ApiAuthenticationEntryPoint authenticationEntryPoint,
