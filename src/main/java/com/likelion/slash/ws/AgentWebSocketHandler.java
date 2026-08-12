@@ -609,8 +609,21 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     // 보조
     // ------------------------------------------------------------------
 
+    /**
+     * 프레임 하나를 이 연결에만 보낸다.
+     *
+     * <p>인증을 마친 뒤에는 Pub/Sub 스레드가 같은 소켓으로 TASK 를 밀어 넣으므로 보관소가 감싼
+     * 세션을 거친다. 인증 전(CHALLENGE·PROTOCOL_ERROR)에는 보관소에 없어 원본 그대로 나간다.
+     * ({@link WsSessionRegistry#guarded})
+     *
+     * <p>{@code ATTR_DEVICE_ID} 는 HELLO 시점에 붙고 등록은 AUTH 성공 뒤라, 이 값이 있다고
+     * 등록된 것은 아니다. 그 구간은 {@code guarded} 가 원본을 돌려주는 것으로 처리된다.
+     */
     private void send(WebSocketSession session, Object frame) throws IOException {
-        session.sendMessage(new TextMessage(objectMapper.writeValueAsString(frame)));
+        Long deviceId = (Long) session.getAttributes().get(ATTR_DEVICE_ID);
+        WebSocketSession target = deviceId == null ? session : registry.guarded(WsTarget.DEVICE, deviceId, session);
+
+        target.sendMessage(new TextMessage(objectMapper.writeValueAsString(frame)));
     }
 
     /**

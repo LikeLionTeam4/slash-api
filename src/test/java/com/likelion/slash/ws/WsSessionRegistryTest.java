@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
 /**
  * {@link WsSessionRegistry} 확인. (WBS W1-06)
@@ -116,6 +117,35 @@ class WsSessionRegistryTest {
     @DisplayName("전달 대상이 없어도 조용히 넘어간다 — 브로드캐스트에서는 이것이 정상이다")
     void 대상이_없어도_예외가_아니다() {
         assertThat(registry.deliver(WsTarget.DEVICE, 기기, "{}")).isZero();
+    }
+
+    @Test
+    @DisplayName("등록된 소켓에 직접 쓸 때도 보관소가 감싼 세션을 준다 — 직렬화를 우회하지 않는다")
+    void 등록된_소켓은_감싼_세션으로_쓴다() {
+        WebSocketSession 원본 = 세션("s1");
+        registry.register(WsTarget.DEVICE, 기기, 원본);
+
+        WebSocketSession 쓸_세션 = registry.guarded(WsTarget.DEVICE, 기기, 원본);
+
+        // 원본 그대로 쓰면 deliver 의 잠금을 우회해 Pub/Sub 스레드와 같은 소켓에 동시에 쓰게 된다.
+        assertThat(쓸_세션)
+                .isNotSameAs(원본)
+                .isInstanceOf(ConcurrentWebSocketSessionDecorator.class);
+
+        // deliver 가 쓰는 것과 같은 인스턴스여야 잠금이 공유된다.
+        assertThat(registry.guarded(WsTarget.DEVICE, 기기, 원본)).isSameAs(쓸_세션);
+    }
+
+    @Test
+    @DisplayName("등록 전에는 준 세션을 그대로 돌려준다 — 아직 아무도 이 소켓을 모른다")
+    void 등록_전에는_원본을_쓴다() {
+        WebSocketSession 인증_전_세션 = 세션("s1");
+
+        assertThat(registry.guarded(WsTarget.DEVICE, 기기, 인증_전_세션)).isSameAs(인증_전_세션);
+
+        // 같은 대상에 다른 연결이 등록돼 있어도, 내 소켓이 등록 전이면 마찬가지다.
+        registry.register(WsTarget.DEVICE, 기기, 세션("다른_연결"));
+        assertThat(registry.guarded(WsTarget.DEVICE, 기기, 인증_전_세션)).isSameAs(인증_전_세션);
     }
 
     private static WebSocketSession 세션(String id) {
