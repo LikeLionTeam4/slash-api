@@ -4,7 +4,9 @@ import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
+import com.likelion.slash.jooq.tables.records.TasksRecord;
 import com.likelion.slash.ws.UserEventPublisher;
+import java.util.Optional;
 import org.jooq.JSONB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,20 +52,16 @@ public class TaskStateWriter {
      * ({@link UserEventPublisher}) 그 안에서 예외를 삼킨다. 화면이 늦게 따라오는 것은
      * 불편이지만, 상태 전이가 취소되는 것은 사실이 달라지는 일이다.
      *
-     * <p>여기서 작업을 한 번 더 읽는 것은 {@code user_id}·{@code public_id} 가 필요해서다.
-     * 상태가 바뀔 때만 일어나므로 잦은 조회가 아니다.
+     * <p>인자로 받는 것은 <b>전이가 돌려준 그 행</b>이다. 다시 읽지 않는다.
      */
-    private void notifyStatusChanged(long taskId, TaskStatus from, TaskStatus to) {
-        taskRepository.findById(taskId).ifPresent(task ->
-                userEvents.taskStatusChanged(task.getUserId(), task.getPublicId(), from, to));
+    private void notifyStatusChanged(TasksRecord task, TaskStatus from, TaskStatus to) {
+        userEvents.taskStatusChanged(task.getUserId(), task.getPublicId(), from, to);
     }
 
     /** 최종 상태에 닿았음을 알린다. 프론트는 이 신호로 결과를 다시 조회한다. */
-    private void notifyFinished(long taskId, TaskStatus from, TaskStatus terminal) {
-        taskRepository.findById(taskId).ifPresent(task -> {
-            userEvents.taskStatusChanged(task.getUserId(), task.getPublicId(), from, terminal);
-            userEvents.taskResultAvailable(task.getUserId(), task.getPublicId(), terminal, task.getResult());
-        });
+    private void notifyFinished(TasksRecord task, TaskStatus from, TaskStatus terminal) {
+        userEvents.taskStatusChanged(task.getUserId(), task.getPublicId(), from, terminal);
+        userEvents.taskResultAvailable(task.getUserId(), task.getPublicId(), terminal, task.getResult());
     }
 
     /** 접수 직후의 최초 기록. 아직 전이가 아니므로 이전 상태는 없다. */
@@ -92,23 +90,25 @@ public class TaskStateWriter {
             log.debug("분석 결과를 반영하지 못했다. 이미 다른 상태다. taskId={}", taskId);
             return false;
         }
-        if (!taskRepository.transition(taskId, TaskStatus.ANALYZING, next)) {
+        Optional<TasksRecord> moved = taskRepository.transition(taskId, TaskStatus.ANALYZING, next);
+        if (moved.isEmpty()) {
             return false;
         }
         taskEventRepository.append(taskId, TaskStatus.ANALYZING, next, reasonCode, message);
-        notifyStatusChanged(taskId, TaskStatus.ANALYZING, next);
+        notifyStatusChanged(moved.get(), TaskStatus.ANALYZING, next);
         return true;
     }
 
     /** 중간 상태로 옮기고 기록한다. */
     @Transactional
     public boolean move(long taskId, TaskStatus from, TaskStatus to, String reasonCode, String message) {
-        if (!taskRepository.transition(taskId, from, to)) {
+        Optional<TasksRecord> moved = taskRepository.transition(taskId, from, to);
+        if (moved.isEmpty()) {
             log.debug("상태 전이 실패. 이미 {} 가 아니다. taskId={}", from, taskId);
             return false;
         }
         taskEventRepository.append(taskId, from, to, reasonCode, message);
-        notifyStatusChanged(taskId, from, to);
+        notifyStatusChanged(moved.get(), from, to);
         return true;
     }
 
@@ -140,11 +140,12 @@ public class TaskStateWriter {
     }
 
     private boolean finishSucceeded(long taskId, JSONB result, String message) {
-        if (!taskRepository.succeed(taskId, TaskStatus.RUNNING, result)) {
+        Optional<TasksRecord> finished = taskRepository.succeed(taskId, TaskStatus.RUNNING, result);
+        if (finished.isEmpty()) {
             return false;
         }
         taskEventRepository.append(taskId, TaskStatus.RUNNING, TaskStatus.SUCCEEDED, null, message);
-        notifyFinished(taskId, TaskStatus.RUNNING, TaskStatus.SUCCEEDED);
+        notifyFinished(finished.get(), TaskStatus.RUNNING, TaskStatus.SUCCEEDED);
         return true;
     }
 
@@ -165,12 +166,14 @@ public class TaskStateWriter {
     /** 실패로 마감하고 기록한다. */
     @Transactional
     public boolean fail(long taskId, TaskStatus from, ErrorCode errorCode, String message) {
-        if (!taskRepository.finishWithError(taskId, from, TaskStatus.FAILED, errorCode)) {
+        Optional<TasksRecord> failed =
+                taskRepository.finishWithError(taskId, from, TaskStatus.FAILED, errorCode);
+        if (failed.isEmpty()) {
             log.debug("실패 마감을 반영하지 못했다. 이미 {} 가 아니다. taskId={}", from, taskId);
             return false;
         }
         taskEventRepository.append(taskId, from, TaskStatus.FAILED, errorCode.name(), message);
-        notifyFinished(taskId, from, TaskStatus.FAILED);
+        notifyFinished(failed.get(), from, TaskStatus.FAILED);
         return true;
     }
 }
