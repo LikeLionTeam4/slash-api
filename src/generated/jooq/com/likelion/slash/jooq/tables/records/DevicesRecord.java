@@ -284,6 +284,23 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
         return (OffsetDateTime) get(16);
     }
 
+    /**
+     * Setter for <code>public.devices.accepting_tasks</code>. 사용자가 새 작업 수신을 켜 둔
+     * 상태인지. 거짓이면 연결돼 있어도 작업을 보내지 않는다.
+     */
+    public DevicesRecord setAcceptingTasks(Boolean value) {
+        set(17, value);
+        return this;
+    }
+
+    /**
+     * Getter for <code>public.devices.accepting_tasks</code>. 사용자가 새 작업 수신을 켜 둔
+     * 상태인지. 거짓이면 연결돼 있어도 작업을 보내지 않는다.
+     */
+    public Boolean getAcceptingTasks() {
+        return (Boolean) get(17);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -307,7 +324,7 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
     /**
      * Create a detached, initialised DevicesRecord
      */
-    public DevicesRecord(Long id, UUID publicId, Long userId, String name, String publicKey, String os, String architecture, String osVersion, String agentVersion, String status, OffsetDateTime lastSeenAt, OffsetDateTime revokedAt, Integer version, OffsetDateTime createdAt, OffsetDateTime updatedAt, String deviceTokenHash, OffsetDateTime deviceTokenExpiresAt) {
+    public DevicesRecord(Long id, UUID publicId, Long userId, String name, String publicKey, String os, String architecture, String osVersion, String agentVersion, String status, OffsetDateTime lastSeenAt, OffsetDateTime revokedAt, Integer version, OffsetDateTime createdAt, OffsetDateTime updatedAt, String deviceTokenHash, OffsetDateTime deviceTokenExpiresAt, Boolean acceptingTasks) {
         super(Devices.DEVICES);
 
         setId(id);
@@ -327,6 +344,7 @@ public class DevicesRecord extends UpdatableRecordImpl<DevicesRecord> {
         setUpdatedAt(updatedAt);
         setDeviceTokenHash(deviceTokenHash);
         setDeviceTokenExpiresAt(deviceTokenExpiresAt);
+        setAcceptingTasks(acceptingTasks);
         resetChangedOnNotNull();
     }
 }

@@ -157,6 +157,12 @@ public class Devices extends TableImpl<DevicesRecord> {
      */
     public final TableField<DevicesRecord, OffsetDateTime> DEVICE_TOKEN_EXPIRES_AT = createField(DSL.name("device_token_expires_at"), SQLDataType.TIMESTAMPWITHTIMEZONE(6), this, "기기 Token 만료 시각. 재발급은 POST /api/v1/agent/sessions/refresh 가 처리한다.");
 
+    /**
+     * The column <code>public.devices.accepting_tasks</code>. 사용자가 새 작업 수신을 켜 둔
+     * 상태인지. 거짓이면 연결돼 있어도 작업을 보내지 않는다.
+     */
+    public final TableField<DevicesRecord, Boolean> ACCEPTING_TASKS = createField(DSL.name("accepting_tasks"), SQLDataType.BOOLEAN.nullable(false).defaultValue(DSL.field(DSL.raw("true"), SQLDataType.BOOLEAN)), this, "사용자가 새 작업 수신을 켜 둔 상태인지. 거짓이면 연결돼 있어도 작업을 보내지 않는다.");
+
     private Devices(Name alias, Table<DevicesRecord> aliased) {
         this(alias, aliased, (Field<?>[]) null, null);
     }
