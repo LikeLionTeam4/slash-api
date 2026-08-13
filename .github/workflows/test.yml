@@ -1,0 +1,103 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: slash
+          POSTGRES_USER: slash
+          POSTGRES_PASSWORD: slash
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      valkey:
+        image: valkey/valkey:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: ./gradlew --no-daemon test
+
+  container-build:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: slash-api:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify container health
+        run: |
+          docker run --detach --name slash-api-test --publish 8080:8080 slash-api:test
+          curl --fail --silent --show-error \
+            --retry 30 --retry-delay 1 --retry-connrefused --retry-all-errors \
+            http://127.0.0.1:8080/actuator/health
+      - name: Stop test container
+        if: always()
+        run: docker rm --force slash-api-test || true
+
+  publish-image:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+    needs: [test, container-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ap-northeast-2
+      ECR_REGISTRY: 061039804626.dkr.ecr.ap-northeast-2.amazonaws.com
+      ECR_REPOSITORY: slash-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::061039804626:role/slash-api-cicd
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Check immutable image tag
+        id: image
+        run: |
+          found=$(aws ecr batch-get-image \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="sha-$GITHUB_SHA" \
+            --query 'length(images)' \
+            --output text)
+          echo "exists=$([ "$found" = "1" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+        if: steps.image.outputs.exists != 'true'
+      - uses: docker/build-push-action@v6
+        if: steps.image.outputs.exists != 'true'
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
