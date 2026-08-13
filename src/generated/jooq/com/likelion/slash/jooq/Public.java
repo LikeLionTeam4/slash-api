@@ -9,6 +9,7 @@ import com.likelion.slash.jooq.tables.AsyncJobs;
 import com.likelion.slash.jooq.tables.AuditEvents;
 import com.likelion.slash.jooq.tables.DeviceCapabilities;
 import com.likelion.slash.jooq.tables.DevicePairingRequests;
+import com.likelion.slash.jooq.tables.DeviceSearchFolders;
 import com.likelion.slash.jooq.tables.Devices;
 import com.likelion.slash.jooq.tables.IdempotencyRecords;
 import com.likelion.slash.jooq.tables.OutboxEvents;
@@ -63,6 +64,11 @@ public class Public extends SchemaImpl {
     public final DevicePairingRequests DEVICE_PAIRING_REQUESTS = DevicePairingRequests.DEVICE_PAIRING_REQUESTS;
 
     /**
+     * Agent 가 READY 프레임의 searchFolders 로 보고한 검색 폴더. 실제 경로는 받지 않는다.
+     */
+    public final DeviceSearchFolders DEVICE_SEARCH_FOLDERS = DeviceSearchFolders.DEVICE_SEARCH_FOLDERS;
+
+    /**
      * 등록된 PC. 로컬 에이전트가 설치된 기기.
      */
     public final Devices DEVICES = Devices.DEVICES;
@@ -113,6 +119,7 @@ public class Public extends SchemaImpl {
             AuditEvents.AUDIT_EVENTS,
             DeviceCapabilities.DEVICE_CAPABILITIES,
             DevicePairingRequests.DEVICE_PAIRING_REQUESTS,
+            DeviceSearchFolders.DEVICE_SEARCH_FOLDERS,
             Devices.DEVICES,
             IdempotencyRecords.IDEMPOTENCY_RECORDS,
             OutboxEvents.OUTBOX_EVENTS,

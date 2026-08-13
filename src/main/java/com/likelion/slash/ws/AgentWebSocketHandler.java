@@ -11,6 +11,8 @@ import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.device.DeviceCapabilityRepository;
 import com.likelion.slash.device.DeviceRepository;
+import com.likelion.slash.device.DeviceSearchFolderRepository;
+import com.likelion.slash.device.SearchFolder;
 import com.likelion.slash.dispatch.AgentDispatchRepository;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
@@ -63,9 +65,11 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  *          ←  RESULT_ACK {persisted, taskStatus}            받아야 Agent 가 결과 캐시를 비운다
  * </pre>
  *
- * <p><b>계약은 slash-agent 의 {@code contracts/src/agentMessages.ts} 가 원본이다.</b>
- * 모든 메시지에 {@code schemaVersion}·{@code eventId}·{@code sentAt} 이 필수이며,
- * Agent 가 zod 로 검증하므로 하나라도 빠지면 메시지 전체가 거부된다.
+ * <p><b>계약은 slash-agent 저장소가 원본이다.</b> 2026-08-12 확인 기준으로 Python 으로 재작성돼
+ * {@code slash-python-agent/src/slash_agent/protocol.py}(봉투·상수·서명 대상)와
+ * {@code agent.py} 의 {@code _build_ready()}(READY 구성)에 있다. 주고받는 JSON 예시는
+ * {@code docs/MESSAGE_GUIDE.md} 다. 모든 메시지에 {@code schemaVersion}·{@code eventId}·
+ * {@code sentAt} 이 필수이고 하나라도 빠지면 메시지 전체가 거부된다.
  * 값과 규칙은 {@link AgentProtocol} 에 모아 두었다.
  *
  * <p><b>인증은 이 핸들러가 직접 한다.</b> 접속 시점에는 아직 누구인지 모르므로 Spring Security 의
@@ -78,8 +82,8 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  *
  * <p><b>남은 것</b>
  * <ul>
- *   <li>READY 의 {@code searchFolders}·{@code projectWorkspaces} — 저장할 표가 없다.
- *       FILE_SEARCH 의 필수 인자 {@code searchFolderId} 가 여기서 나오므로 W1-03 과 함께 만든다.</li>
+ *   <li>READY 의 {@code projectWorkspaces} — 저장할 표가 없다. CODE_ANALYSIS 의
+ *       {@code workspaceId} 가 {@code searchFolderId} 와 같은 자리라 P1 에서 같은 방식으로 만든다.</li>
  *   <li>핸드셰이크 시간 제한 — HELLO 없이 붙어만 있는 연결이 쌓이는 것을 막아야 한다.</li>
  *   <li>PROGRESS 를 화면에 전달하는 것 — 지금은 기록만 남기고 흘려보낸다.</li>
  * </ul>
@@ -126,6 +130,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final AgentSignatureVerifier signatureVerifier;
     private final DeviceRepository deviceRepository;
     private final DeviceCapabilityRepository deviceCapabilityRepository;
+    private final DeviceSearchFolderRepository deviceSearchFolderRepository;
     private final AgentDispatchRepository agentDispatchRepository;
     private final TaskService taskService;
     private final TaskRepository taskRepository;
@@ -136,6 +141,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                                  AgentSignatureVerifier signatureVerifier,
                                  DeviceRepository deviceRepository,
                                  DeviceCapabilityRepository deviceCapabilityRepository,
+                                 DeviceSearchFolderRepository deviceSearchFolderRepository,
                                  AgentDispatchRepository agentDispatchRepository,
                                  TaskService taskService,
                                  TaskRepository taskRepository,
@@ -145,6 +151,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         this.signatureVerifier = signatureVerifier;
         this.deviceRepository = deviceRepository;
         this.deviceCapabilityRepository = deviceCapabilityRepository;
+        this.deviceSearchFolderRepository = deviceSearchFolderRepository;
         this.agentDispatchRepository = agentDispatchRepository;
         this.taskService = taskService;
         this.taskRepository = taskRepository;
@@ -376,14 +383,17 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
             parseTaskType(node.asText()).ifPresent(reported::add);
         }
 
+        List<SearchFolder> searchFolders = parseSearchFolders(frame.path("searchFolders"));
+
         deviceCapabilityRepository.replaceAll(deviceId, reported);
+        deviceSearchFolderRepository.replaceAll(deviceId, searchFolders);
         deviceRepository.updateConnectionState(deviceId, DeviceStatus.READY);
         session.getAttributes().put(ATTR_READY_REPORTED, Boolean.TRUE);
 
-        // searchFolders·projectWorkspaces·maxConcurrentTasks 는 저장할 표가 없어 아직 버린다.
-        // FILE_SEARCH 의 필수 인자 searchFolderId 가 여기서 나오므로 W1-03 과 함께 만들어야 한다.
+        // projectWorkspaces·maxConcurrentTasks 는 저장할 표가 없어 아직 버린다.
+        // CODE_ANALYSIS 의 workspaceId 가 searchFolderId 와 같은 자리라 P1 에서 같은 방식으로 만든다.
         log.info("Agent READY deviceId={} 지원작업={} 검색폴더={}개 동시작업={}",
-                deviceId, reported, frame.path("searchFolders").size(),
+                deviceId, reported, searchFolders.size(),
                 frame.path("maxConcurrentTasks").asInt(0));
 
         // PC 가 꺼져 있는 동안 접수된 작업을 이제 내보낸다. (WBS W1-04)
@@ -395,6 +405,27 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         } catch (Exception e) {
             log.warn("대기 작업 전달 실패 deviceId={}: {}", deviceId, e.getMessage());
         }
+    }
+
+    /**
+     * READY 의 {@code searchFolders} 를 읽는다.
+     *
+     * <p>계약은 slash-agent 의 {@code file_index.py} 가 원본이다. <b>실제 경로는 오지 않는다</b> —
+     * Agent 가 자기만 들고 있고 서버에는 식별자·표시 이름·색인 상태만 보낸다.
+     *
+     * <p>모양이 어긋난 항목은 {@link SearchFolder#isStorable()} 이 저장 단계에서 거른다.
+     * 여기서 끊지 않는 이유는 {@code supportedTaskTypes} 와 같다 — Agent 가 새 필드를 먼저
+     * 배포해도 READY 전체가 실패하면 안 된다.
+     */
+    private List<SearchFolder> parseSearchFolders(JsonNode reported) {
+        List<SearchFolder> folders = new ArrayList<>();
+        for (JsonNode node : reported) {
+            folders.add(new SearchFolder(
+                    node.path("searchFolderId").asText(null),
+                    node.path("displayName").asText(null),
+                    node.path("indexStatus").asText(null)));
+        }
+        return folders;
     }
 
     private void handleHeartbeat(WebSocketSession session, State state, UUID eventId) throws IOException {
