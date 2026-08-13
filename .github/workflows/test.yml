@@ -34,21 +34,11 @@ jobs:
             --env TZ=Asia/Seoul \
             postgres:16 postgres -c timezone=Asia/Seoul
           until docker exec postgres pg_isready -U slash -d slash; do sleep 1; done
-          echo "--- debug: reset_val for TimeZone ---"
-          docker exec postgres psql -U slash -d slash -tAc "SELECT reset_val FROM pg_settings WHERE name='TimeZone';"
-          docker exec postgres printenv TZ
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
       - run: ./gradlew --no-daemon test
-      - name: Debug postgres state after test
-        if: always()
-        run: |
-          echo "--- reset_val AFTER gradlew test ---"
-          docker exec postgres psql -U slash -d slash -tAc "SELECT reset_val FROM pg_settings WHERE name='TimeZone';"
-          echo "--- postgres container logs (tail) ---"
-          docker logs postgres 2>&1 | tail -60
       - name: Stop Postgres
         if: always()
         run: docker rm --force postgres || true
@@ -69,15 +59,37 @@ jobs:
           tags: slash-api:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # 이미지가 뜨는지 보려면 DB 가 있어야 한다. 기동 때 Flyway 마이그레이션이 돌아서
+      # DB 가 없으면 애플리케이션이 아예 시작하지 못한다.
+      - name: Start Postgres, Valkey
+        run: |
+          docker run --detach --name postgres --network host \
+            --env POSTGRES_DB=slash \
+            --env POSTGRES_USER=slash \
+            --env POSTGRES_PASSWORD=slash \
+            --env TZ=Asia/Seoul \
+            postgres:16 postgres -c timezone=Asia/Seoul
+          docker run --detach --name valkey --network host valkey/valkey:8-alpine
+          until docker exec postgres pg_isready -U slash -d slash; do sleep 1; done
       - name: Verify container health
         run: |
-          docker run --detach --name slash-api-test --publish 8080:8080 slash-api:test
+          # --network host 로 붙여야 컨테이너 안의 localhost 가 러너의 DB 를 가리킨다.
+          # 컨테이너 자신의 localhost 를 보면 아무것도 없다.
+          docker run --detach --name slash-api-test --network host \
+            --env DB_URL=jdbc:postgresql://127.0.0.1:5432/slash \
+            --env DB_USERNAME=slash \
+            --env DB_PASSWORD=slash \
+            --env VALKEY_HOST=127.0.0.1 \
+            slash-api:test
           curl --fail --silent --show-error \
             --retry 30 --retry-delay 1 --retry-connrefused --retry-all-errors \
             http://127.0.0.1:8080/actuator/health
-      - name: Stop test container
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs slash-api-test 2>&1 | tail -40
+      - name: Stop containers
         if: always()
-        run: docker rm --force slash-api-test || true
+        run: docker rm --force slash-api-test postgres valkey || true
 
   publish-image:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
