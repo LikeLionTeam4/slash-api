@@ -54,6 +54,23 @@ public class DeviceRepository {
                 .fetch();
     }
 
+    /**
+     * 화면에 보여줄 내 PC 목록. 해제한 기기는 뺀다.
+     *
+     * <p>해제한 기기는 사용자가 이미 지운 것이라 목록에 남을 이유가 없다. 게다가 등록 화면이
+     * 목록 길이로 등록 한도를 판단하므로, 섞여 있으면 더 등록할 수 있는데도 막히게 된다.
+     *
+     * <p>행 자체는 지우지 않고 {@code REVOKED} 로 남겨 둔다. 작업 이력이 기기를 참조하기
+     * 때문이다. 이력 조회가 필요하면 {@link #findAllByUserId} 를 쓴다.
+     */
+    public List<DevicesRecord> findActiveByUserId(long userId) {
+        return dsl.selectFrom(DEVICES)
+                .where(DEVICES.USER_ID.eq(userId))
+                .and(DEVICES.STATUS.ne(DeviceStatus.REVOKED.name()))
+                .orderBy(DEVICES.CREATED_AT.desc(), DEVICES.ID.desc())
+                .fetch();
+    }
+
     /** 소유권을 강제한 단건 조회. 남의 기기면 비어 있다. */
     public Optional<DevicesRecord> findByPublicIdAndUserId(UUID publicId, long userId) {
         return dsl.selectFrom(DEVICES)

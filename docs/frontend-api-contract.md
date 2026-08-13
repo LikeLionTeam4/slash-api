@@ -24,7 +24,8 @@ slash-api 를 호출할 때 지켜야 하는 공통 규약입니다.
 | **동작 중** | `GET /api/v1/task-types` — 작업 유형 기준 목록 |
 | **동작 중** | `POST /api/v1/requests` — 작업 접수 |
 | **동작 중** | `GET /api/v1/tasks/{taskId}` — 작업 상태·결과 조회 |
-| 계약만 확정 | 기기 API (W1-03) |
+| **동작 중** | `GET /api/v1/devices` — 등록된 PC 목록 |
+| 계약만 확정 | 기기 이름 변경·연결 해제 (W1-03) |
 
 ### PC 등록 화면 (W1-02)
 
@@ -55,6 +56,48 @@ GET  /api/v1/pairing-requests/{id}       → 200
 
 > Agent 가 호출하는 `POST /api/v1/agent/pair`·`/pair/verify`·`/sessions/refresh` 는
 > 프론트가 부를 일이 없습니다. 사용자 인증 없이 Ed25519 서명으로 동작하는 별도 경로입니다.
+
+### 지정 PC 관리 화면 (W1-03)
+
+```
+GET  /api/v1/devices                     → 200
+{ "data": { "devices": [
+    { "deviceId": "e0d68b9f-…", "name": "내 PC", "status": "READY",
+      "os": "MACOS", "osVersion": "macOS-26.6.1-arm64-arm-64bit",
+      "agentVersion": "slash-agent-py/0.1.0",
+      "lastSeenAt": "2026-08-13T10:24:01.431535+09:00",
+      "registeredAt": "2026-08-12T17:50:19.195244+09:00" } ] } }
+```
+
+**화면을 열 때 이걸 부르면 됩니다.** 등록이 끝난 뒤(`CLAIMED`)에도 이 목록을 다시 불러
+갱신하는 편이 안전합니다 — 다른 탭에서 등록한 PC 도 함께 들어옵니다.
+
+**해제한 PC 는 목록에 오지 않습니다.** 등록 한도를 `devices.length` 로 판단해도 됩니다.
+
+> **`osVersion` 과 `agentVersion` 은 Agent 가 보고한 원문 그대로입니다.** 위 예시가 실제
+> 형태입니다 — 서버가 다듬지 않습니다. 화면에 그대로 뿌리면 거칠어 보이니, 필요하면
+> 앞부분만 잘라 쓰거나(`macOS-26.6.1` 까지) 도구 설명으로 넘기세요.
+>
+> **한 번도 연결된 적 없는 PC 는 이 셋이 아예 없습니다.** `osVersion`·`agentVersion`·
+> `lastSeenAt` 은 값이 `null` 이면 응답에서 빠집니다(§2). 옵셔널 체이닝으로 접근하세요.
+
+#### `status` 로 연결 여부 판단하기
+
+| status | 뜻 | 연결됨 표시 |
+|---|---|---|
+| `READY` | 작업을 받을 수 있음 | ✅ |
+| `ONLINE` | 붙어 있으나 준비 보고 전 | ✅ |
+| `BUSY` | 작업 하나 실행 중 | ✅ |
+| `OFFLINE` | 꺼져 있거나 90초 동안 소식 없음 | ❌ |
+
+`REVOKED` 는 이 목록에 오지 않으므로 다루지 않아도 됩니다.
+
+> **`status` 는 최대 2분까지 늦을 수 있습니다.** PC 가 꺼진 것을 알려주는 신호가 없어서,
+> 서버가 마지막 Heartbeat 로부터 90초가 지났는지를 30초마다 확인해 내립니다.
+> 더 정확한 시각이 필요하면 `lastSeenAt` 을 직접 보세요.
+
+> `deviceId` 가 작업 접수의 `selectedDeviceId` 에 넣는 값입니다. PC 를 고르는 화면을 만들면
+> 이 값을 그대로 쓰면 됩니다.
 
 ### 입력창 화면 (W1-04)
 
