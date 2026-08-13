@@ -17,8 +17,12 @@ import java.util.UUID;
  * @param os           {@code WINDOWS} 또는 {@code MACOS}
  * @param osVersion    Agent 가 보고한 운영체제 버전. 없을 수 있다
  * @param agentVersion 그 PC 에 설치된 Agent 판. 없을 수 있다
+ * @param acceptingTasks 사용자가 새 작업 수신을 켜 두었는지. 거짓이면 연결돼 있어도 작업을
+ *                       보내지 않는다. 연결 해제와 달리 되돌릴 수 있다 (#24)
  * @param lastSeenAt   마지막 Heartbeat 시각. 한 번도 연결된 적 없으면 null
  * @param registeredAt 등록 시각
+ * @param version      수정 요청의 {@code If-Match} 에 넣을 값. 그 사이 다른 탭에서 먼저 바뀌었으면
+ *                     412 로 거절된다. Heartbeat 로 인한 상태 변화는 이 값을 올리지 않는다
  */
 public record DeviceResponse(
         UUID deviceId,
@@ -27,8 +31,10 @@ public record DeviceResponse(
         String os,
         String osVersion,
         String agentVersion,
+        boolean acceptingTasks,
         OffsetDateTime lastSeenAt,
-        OffsetDateTime registeredAt) {
+        OffsetDateTime registeredAt,
+        int version) {
 
     public static DeviceResponse from(DevicesRecord device) {
         return new DeviceResponse(
@@ -38,7 +44,9 @@ public record DeviceResponse(
                 device.getOs(),
                 device.getOsVersion(),
                 device.getAgentVersion(),
+                Boolean.TRUE.equals(device.getAcceptingTasks()),
                 device.getLastSeenAt(),
-                device.getCreatedAt());
+                device.getCreatedAt(),
+                device.getVersion());
     }
 }

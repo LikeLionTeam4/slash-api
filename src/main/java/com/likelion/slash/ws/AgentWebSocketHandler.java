@@ -104,7 +104,6 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private static final String ATTR_READY_REPORTED = "slash.readyReported";
 
     /** 애플리케이션 정의 종료 코드. 참조 구현이 PROTOCOL_ERROR 와 함께 쓰는 값과 맞춘다. */
-    private static final int CLOSE_CODE_PROTOCOL_ERROR = 4400;
 
     /** 같은 기기가 다시 접속해 옛 연결을 밀어낼 때. 오류가 아니므로 별도 코드를 쓴다. */
     private static final CloseStatus CLOSE_SUPERSEDED = new CloseStatus(4409, "CONNECTION_SUPERSEDED");
@@ -669,7 +668,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         send(session, ProtocolErrorFrame.of(code, message, relatedEventId, close));
 
         if (close) {
-            close(session, new CloseStatus(CLOSE_CODE_PROTOCOL_ERROR, code));
+            close(session, new CloseStatus(AgentProtocol.CLOSE_CODE_PROTOCOL_ERROR, code));
         }
     }
 

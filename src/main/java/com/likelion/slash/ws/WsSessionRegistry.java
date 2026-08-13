@@ -145,6 +145,35 @@ public class WsSessionRegistry {
         return sent;
     }
 
+    /**
+     * 대상의 모든 연결을 닫는다. 이 Pod 에 연결이 없으면 아무 일도 하지 않는다.
+     *
+     * <p>연결 해제처럼 <b>더는 붙어 있으면 안 되는</b> 경우에 쓴다. 보내기와 달리 보관소에서도
+     * 빼는데, 닫힘 처리가 비동기라 그 사이 다음 프레임이 죽은 소켓으로 나가는 것을 막기 위해서다.
+     *
+     * @return 실제로 닫은 연결 수
+     */
+    public int closeAll(WsTarget target, long targetId, CloseStatus status) {
+        Map<String, WebSocketSession> held = sessions.remove(new Key(target, targetId));
+        if (held == null || held.isEmpty()) {
+            return 0;
+        }
+
+        int closed = 0;
+        for (WebSocketSession session : held.values()) {
+            try {
+                session.close(status);
+                closed++;
+            } catch (IOException | IllegalStateException e) {
+                // 이미 끊긴 연결이다. 목적은 달성된 것이라 실패로 보지 않는다.
+                log.debug("WSS 종료 실패 target={} targetId={} sessionId={}: {}",
+                        target, targetId, session.getId(), e.getMessage());
+            }
+        }
+
+        return closed;
+    }
+
     /** 이 Pod 이 들고 있는 연결 수. 운영 확인용. */
     public int connectionCount(WsTarget target) {
         return sessions.entrySet().stream()

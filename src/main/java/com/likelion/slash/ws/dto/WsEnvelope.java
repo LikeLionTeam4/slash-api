@@ -20,11 +20,15 @@ import java.time.OffsetDateTime;
  * @param frame    소켓으로 그대로 내보낼 프레임
  * @param issuedAt 발행 시각 (한국 시각)
  * @param originPod 발행한 Pod. 추적용이며 라우팅 판단에는 쓰지 않는다.
+ * @param closeAfterSend 프레임을 보낸 뒤 연결을 닫을지. 연결 해제처럼 더는 붙어 있으면 안 되는
+ *                       경우에 참이다. <b>프레임 내용으로 판단하지 않으려고 봉투에 둔다</b> —
+ *                       그러면 수신 쪽이 Agent 프로토콜을 알아야 한다.
  */
 public record WsEnvelope(
         WsTarget target,
         long targetId,
         JsonNode frame,
         OffsetDateTime issuedAt,
-        String originPod) {
+        String originPod,
+        boolean closeAfterSend) {
 }

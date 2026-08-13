@@ -52,8 +52,25 @@ public class WsMessagePublisher {
      * @param frame    소켓으로 나갈 프레임 객체. 봉투는 여기서 씌우고 수신 Pod 이 벗긴다.
      */
     public void send(WsTarget target, long targetId, Object frame) {
+        publish(target, targetId, frame, false);
+    }
+
+    /**
+     * 프레임을 보낸 뒤 연결을 닫는다.
+     *
+     * <p>연결 해제처럼 <b>더는 붙어 있으면 안 되는</b> 경우에 쓴다. 이유를 먼저 알리고 끊어야
+     * Agent 가 재접속을 반복하지 않는다.
+     *
+     * <p>연결을 들고 있는 Pod 이 어디인지 모르므로 전체에 발행한다. 들고 있는 Pod 만 닫는다.
+     */
+    public void sendAndClose(WsTarget target, long targetId, Object frame) {
+        publish(target, targetId, frame, true);
+    }
+
+    private void publish(WsTarget target, long targetId, Object frame, boolean closeAfterSend) {
         JsonNode frameNode = objectMapper.valueToTree(frame);
-        WsEnvelope envelope = new WsEnvelope(target, targetId, frameNode, SlashTime.now(), podName);
+        WsEnvelope envelope =
+                new WsEnvelope(target, targetId, frameNode, SlashTime.now(), podName, closeAfterSend);
 
         try {
             redis.convertAndSend(target.channel(), objectMapper.writeValueAsString(envelope));

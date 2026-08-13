@@ -1,7 +1,10 @@
 package com.likelion.slash.ws;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -14,8 +17,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -95,6 +100,47 @@ class WsPodRoutingTest {
         assertThat(objectMapper.readTree(captor.getValue().getPayload()).path("dispatchId").asText())
                 .isEqualTo(전달될_전달.toString());
         assertThat(registry.holds(WsTarget.DEVICE, 연결이_없는_기기)).isFalse();
+    }
+
+    @Test
+    @DisplayName("해제를 발행하면 사유를 보낸 뒤 연결을 끊는다")
+    void 해제하면_끊는다() throws Exception {
+        session = 세션();
+        registry.register(WsTarget.DEVICE, 기기, session);
+
+        publisher.sendAndClose(WsTarget.DEVICE, 기기, 해제_프레임());
+
+        // 순서가 중요하다. 그냥 닫으면 Agent 는 이유를 모른 채 재접속을 반복한다.
+        InOrder 순서 = inOrder(session);
+        순서.verify(session, timeout(5_000)).sendMessage(any(TextMessage.class));
+
+        ArgumentCaptor<CloseStatus> captor = ArgumentCaptor.forClass(CloseStatus.class);
+        순서.verify(session, timeout(5_000)).close(captor.capture());
+        assertThat(captor.getValue().getCode()).isEqualTo(AgentProtocol.CLOSE_CODE_PROTOCOL_ERROR);
+        assertThat(captor.getValue().getReason()).isEqualTo(AgentProtocol.ERROR_DEVICE_REVOKED);
+
+        // 보관소에서도 빠져야 한다. 닫힘 처리가 비동기라 그 사이 다음 프레임이 죽은 소켓으로 나간다.
+        assertThat(registry.holds(WsTarget.DEVICE, 기기)).isFalse();
+    }
+
+    @Test
+    @DisplayName("보통 프레임은 보내기만 하고 연결을 끊지 않는다")
+    void 보통_프레임은_끊지_않는다() throws Exception {
+        session = 세션();
+        registry.register(WsTarget.DEVICE, 기기, session);
+
+        publisher.send(WsTarget.DEVICE, 기기, 작업_프레임(UUID.randomUUID()));
+
+        verify(session, timeout(5_000)).sendMessage(any(TextMessage.class));
+        verify(session, never()).close(any(CloseStatus.class));
+        assertThat(registry.holds(WsTarget.DEVICE, 기기)).isTrue();
+    }
+
+    private static Map<String, Object> 해제_프레임() {
+        Map<String, Object> frame = new LinkedHashMap<>();
+        frame.put("type", "PROTOCOL_ERROR");
+        frame.put("code", AgentProtocol.ERROR_DEVICE_REVOKED);
+        return frame;
     }
 
     private static Map<String, Object> 작업_프레임(UUID dispatchId) {

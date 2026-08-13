@@ -25,7 +25,9 @@ slash-api 를 호출할 때 지켜야 하는 공통 규약입니다.
 | **동작 중** | `POST /api/v1/requests` — 작업 접수 |
 | **동작 중** | `GET /api/v1/tasks/{taskId}` — 작업 상태·결과 조회 |
 | **동작 중** | `GET /api/v1/devices` — 등록된 PC 목록 |
-| 계약만 확정 | 기기 이름 변경·연결 해제 (W1-03) |
+| **동작 중** | `DELETE /api/v1/devices/{id}` — PC 등록 해제 |
+| **동작 중** | `PATCH /api/v1/devices/{id}/task-intake` — 작업 수신 켜기·끄기 |
+| 계약만 확정 | 기기 이름 변경 (W1-03) |
 
 ### PC 등록 화면 (W1-02)
 
@@ -64,9 +66,17 @@ GET  /api/v1/devices                     → 200
 { "data": { "devices": [
     { "deviceId": "e0d68b9f-…", "name": "내 PC", "status": "READY",
       "os": "MACOS", "osVersion": "macOS-26.6.1-arm64-arm-64bit",
-      "agentVersion": "slash-agent-py/0.1.0",
+      "agentVersion": "slash-agent-py/0.1.0", "acceptingTasks": true,
       "lastSeenAt": "2026-08-13T10:24:01.431535+09:00",
-      "registeredAt": "2026-08-12T17:50:19.195244+09:00" } ] } }
+      "registeredAt": "2026-08-12T17:50:19.195244+09:00", "version": 0 } ] } }
+
+DELETE /api/v1/devices/{deviceId}        → 204   (PC 등록 해제)
+If-Match: "0"
+
+PATCH  /api/v1/devices/{deviceId}/task-intake  → 200   (작업 수신 켜기·끄기)
+If-Match: "0"
+{ "accepting": false }
+{ "data": { "deviceId": "…", "acceptingTasks": false, "version": 1, … } }
 ```
 
 **화면을 열 때 이걸 부르면 됩니다.** 등록이 끝난 뒤(`CLAIMED`)에도 이 목록을 다시 불러
@@ -98,6 +108,39 @@ GET  /api/v1/devices                     → 200
 
 > `deviceId` 가 작업 접수의 `selectedDeviceId` 에 넣는 값입니다. PC 를 고르는 화면을 만들면
 > 이 값을 그대로 쓰면 됩니다.
+
+#### 등록 해제와 작업 수신 중지는 다릅니다
+
+| | 해제 (`DELETE`) | 수신 중지 (`PATCH .../task-intake`) |
+|---|---|---|
+| 되돌리기 | **불가**. 다시 등록하려면 코드를 새로 받아야 합니다 | 가능. 언제든 다시 켤 수 있습니다 |
+| 연결 | **그 자리에서 끊깁니다.** 다시 붙지 못합니다 | 그대로 유지됩니다 |
+| 목록 | 사라집니다 | 남아 있고 `acceptingTasks: false` 로 옵니다 |
+| 그동안 온 요청 | 보낼 PC 가 없으므로 실패합니다 | `WAITING_FOR_DEVICE` 로 쌓였다가 다시 켜면 실행됩니다 |
+| 실행 중인 작업 | 연결이 끊겨 결과를 받지 못합니다 | 끝까지 실행됩니다. **새 작업만** 안 받습니다 |
+
+X 버튼(해제)은 되돌릴 수 없으니 확인을 한 번 받는 편이 좋습니다.
+
+#### 수정 요청에는 `If-Match` 가 필요합니다
+
+`DELETE` 와 `PATCH` 둘 다 조회 응답의 `version` 을 `If-Match` 로 넣어야 합니다.
+
+```
+If-Match: "0"      ← 목록 응답의 version 값
+```
+
+- **400 `VALIDATION_ERROR`** — 헤더를 빠뜨렸거나 숫자로 읽을 수 없음
+- **412 `RESOURCE_VERSION_MISMATCH`** — 그 사이 다른 탭·기기에서 먼저 바뀜 → **재조회 후 다시 시도**
+- **404 `RESOURCE_NOT_FOUND`** — 없는 기기이거나 이미 해제된 기기
+
+`version` 은 **사용자가 일으킨 변경에만** 올라갑니다. PC 가 켜지고 꺼지는 것(Heartbeat)으로는
+바뀌지 않으니, 화면을 오래 열어 두어도 들고 있던 값이 헛되이 낡지 않습니다.
+
+`PATCH` 응답에 바뀐 기기가 그대로 들어 있어 목록을 다시 부르지 않아도 되고, 다음 수정에 쓸
+`version` 도 거기 있습니다.
+
+> **`accepting` 은 토글이 아니라 원하는 상태를 그대로 보냅니다.** 같은 값을 두 번 보내도
+> 결과가 같습니다. 화면이 들고 있는 값이 낡았을 때 의도와 반대로 뒤집히는 것을 막습니다.
 
 ### 입력창 화면 (W1-04)
 
@@ -137,7 +180,7 @@ GET  /api/v1/tasks/{taskId}              → 200
 |---|---|---|
 | `ANALYZING` | 무슨 요청인지 분석 중 | 진행 표시 |
 | `NEEDS_CLARIFICATION` | 되물어야 함 | `question` 을 보여주고 다시 입력받기 |
-| `WAITING_FOR_DEVICE` | **PC 가 꺼져 있어 대기 중** | "PC 가 켜지면 실행됩니다" |
+| `WAITING_FOR_DEVICE` | **PC 가 작업을 받을 수 없어 대기 중** | 아래 안내 문구를 그대로 |
 | `QUEUED` | PC 로 보냈고 수락 대기 | 진행 표시 |
 | `RUNNING` | 실행 중 | 진행 표시 |
 | `SUCCEEDED` | 완료 | `result` 표시 |
@@ -146,6 +189,10 @@ GET  /api/v1/tasks/{taskId}              → 200
 > **`WAITING_FOR_DEVICE` 를 오류로 다루지 마세요.** PC 가 꺼져 있어도 요청은 정상 접수됩니다.
 > 사용자가 PC 를 켜면 그때 실행되고 상태가 알아서 넘어갑니다. 이게 데스크톱 앱으로는 안 되는
 > 동작이라 시연에서 보여줄 장면이기도 합니다.
+>
+> 기다리는 이유가 두 가지입니다 — **PC 가 꺼져 있거나, 작업 수신을 꺼 두었거나.** 서버가
+> 타임라인 안내 문구로 구분해 주니 그대로 보여주면 됩니다. ("PC 가 연결되면 실행합니다" /
+> "PC 가 작업 수신을 다시 켜면 실행합니다") 둘 다인 경우에는 연결부터 안내합니다.
 
 > `POST` 응답의 `status` 는 **고정값이 아닙니다.** 접수 시점에 이미 정해진 실제 상태가 옵니다.
 > PC 가 붙어 있으면 `QUEUED`, 꺼져 있으면 `WAITING_FOR_DEVICE`, 못 알아들었으면 `FAILED` 입니다.

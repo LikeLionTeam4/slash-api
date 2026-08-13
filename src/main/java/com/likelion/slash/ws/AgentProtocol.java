@@ -41,6 +41,14 @@ public final class AgentProtocol {
     public static final String ERROR_INVALID_CONNECTION_STATE = "INVALID_CONNECTION_STATE";
     public static final String ERROR_DEVICE_REVOKED = "DEVICE_REVOKED";
 
+    /**
+     * PROTOCOL_ERROR 로 끊을 때 쓰는 WebSocket 종료 코드.
+     *
+     * <p>4000~4999 는 응용이 정할 수 있는 구간이다. 종료 사유는 {@code CloseStatus} 의 이유
+     * 문자열에 {@code code} 를 그대로 실어 보낸다.
+     */
+    public static final int CLOSE_CODE_PROTOCOL_ERROR = 4400;
+
     /** 도전값 유효 시간. 참조 구현과 같은 30초. */
     public static final long CHALLENGE_TTL_SECONDS = 30;
 

@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.CloseStatus;
 
 /**
  * 다른 Pod 이 발행한 WSS 프레임을 받아, 이 Pod 이 연결을 들고 있을 때만 내보낸다.
@@ -25,6 +26,10 @@ import org.springframework.stereotype.Component;
 public class WsMessageListener implements MessageListener {
 
     private static final Logger log = LoggerFactory.getLogger(WsMessageListener.class);
+
+    /** 연결 해제로 끊을 때의 종료 상태. 사유를 실어 보내야 Agent 가 재접속을 반복하지 않는다. */
+    private static final CloseStatus CLOSE_REVOKED =
+            new CloseStatus(AgentProtocol.CLOSE_CODE_PROTOCOL_ERROR, AgentProtocol.ERROR_DEVICE_REVOKED);
 
     private final WsSessionRegistry registry;
     private final ObjectMapper objectMapper;
@@ -59,6 +64,13 @@ public class WsMessageListener implements MessageListener {
             // 보낸 것으로 남아 스윕 대상에서 빠진다.
             if (sent > 0) {
                 dispatchDeliveryRecorder.recordDelivered(envelope.frame());
+            }
+
+            // 연결 해제처럼 더는 붙어 있으면 안 되는 경우다. 이유를 먼저 보내고 끊는다.
+            if (envelope.closeAfterSend()) {
+                int closed = registry.closeAll(envelope.target(), envelope.targetId(), CLOSE_REVOKED);
+                log.info("WSS 연결 종료 target={} targetId={} 연결={}",
+                        envelope.target(), envelope.targetId(), closed);
             }
 
         } catch (Exception e) {
