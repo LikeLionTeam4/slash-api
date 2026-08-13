@@ -10,6 +10,7 @@ import com.likelion.slash.jooq.Public;
 import com.likelion.slash.jooq.tables.AgentDispatches.AgentDispatchesPath;
 import com.likelion.slash.jooq.tables.DeviceCapabilities.DeviceCapabilitiesPath;
 import com.likelion.slash.jooq.tables.DevicePairingRequests.DevicePairingRequestsPath;
+import com.likelion.slash.jooq.tables.DeviceSearchFolders.DeviceSearchFoldersPath;
 import com.likelion.slash.jooq.tables.Tasks.TasksPath;
 import com.likelion.slash.jooq.tables.Users.UsersPath;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
@@ -271,6 +272,19 @@ public class Devices extends TableImpl<DevicesRecord> {
             _deviceCapabilities = new DeviceCapabilitiesPath(this, null, Keys.DEVICE_CAPABILITIES__FK_DEVICE_CAPABILITIES_DEVICE.getInverseKey());
 
         return _deviceCapabilities;
+    }
+
+    private transient DeviceSearchFoldersPath _deviceSearchFolders;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.device_search_folders</code> table
+     */
+    public DeviceSearchFoldersPath deviceSearchFolders() {
+        if (_deviceSearchFolders == null)
+            _deviceSearchFolders = new DeviceSearchFoldersPath(this, null, Keys.DEVICE_SEARCH_FOLDERS__FK_DEVICE_SEARCH_FOLDERS_DEVICE.getInverseKey());
+
+        return _deviceSearchFolders;
     }
 
     private transient AgentDispatchesPath _agentDispatches;

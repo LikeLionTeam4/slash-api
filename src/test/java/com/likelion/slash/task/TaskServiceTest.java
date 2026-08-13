@@ -13,6 +13,8 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.auth.AuthenticatedUser;
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.DeviceStatus;
@@ -20,6 +22,8 @@ import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.common.error.SlashException;
+import com.likelion.slash.device.DeviceSearchFolderRepository;
+import com.likelion.slash.device.SearchFolder;
 import com.likelion.slash.dispatch.TaskDispatcher;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
 import com.likelion.slash.nlu.NluClient;
@@ -61,6 +65,12 @@ class TaskServiceTest {
 
     @Autowired
     private DSLContext dsl;
+
+    @Autowired
+    private DeviceSearchFolderRepository deviceSearchFolderRepository;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @MockitoBean
     private NluClient nluClient;
@@ -270,6 +280,110 @@ class TaskServiceTest {
         assertThat(응답.status()).isNotEqualTo(TaskStatus.NEEDS_CLARIFICATION);
     }
 
+    // ------------------------------------------------------------------
+    // 검색 폴더 (WBS W1-03)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("/file 은 PC 가 보고한 폴더 중 하나를 searchFolderId 로 채워 보낸다")
+    void 검색폴더를_채워_보낸다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        검색폴더가(deviceId, new SearchFolder("sf-1", "문서", SearchFolder.INDEXED));
+        NLU가(작업분석("FILE_SEARCH", Map.of("query", "보고서")));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/file 보고서", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+
+        // Agent 는 이 값으로 자기 폴더를 되찾는다. 우리가 만든 값이 아니라 받은 값 그대로여야 한다.
+        // JSONB 는 PostgreSQL 이 정규화하므로 문자열이 아니라 값으로 본다.
+        assertThat(파라미터(응답.taskId(), "searchFolderId")).isEqualTo("sf-1");
+        assertThat(파라미터(응답.taskId(), "query")).isEqualTo("보고서");
+    }
+
+    @Test
+    @DisplayName("검색할 폴더가 없으면 SEARCH_FOLDER_NOT_FOUND 로 마감한다")
+    void 폴더가_없으면_마감한다() {
+        준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("FILE_SEARCH", Map.of("query", "보고서")));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/file 보고서", null), null);
+
+        // 채우지 못한 채 보내면 Agent 가 INVALID_PARAMETERS 로 거절한다. 여기서 끝내는 편이 이유가 분명하다.
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.SEARCH_FOLDER_NOT_FOUND.name());
+        verify(taskDispatcher, never()).dispatch(any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("색인 중인 폴더뿐이어도 보낸다 — 버리면 재접속 전까지 /file 이 죽는다")
+    void 색인_중이어도_보낸다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        검색폴더가(deviceId, new SearchFolder("sf-1", "문서", SearchFolder.INDEXING));
+        NLU가(작업분석("FILE_SEARCH", Map.of("query", "보고서")));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/file 보고서", null), null);
+
+        // Agent 의 is_searchable() 은 UNAVAILABLE 만 거른다. 색인 중이어도 검색해 준다.
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+        assertThat(파라미터(응답.taskId(), "searchFolderId")).isEqualTo("sf-1");
+    }
+
+    @Test
+    @DisplayName("읽을 수 없는 폴더뿐이면 SEARCH_FOLDER_NOT_FOUND 로 마감한다")
+    void 읽을_수_없으면_마감한다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        검색폴더가(deviceId, new SearchFolder("sf-1", "문서", SearchFolder.UNAVAILABLE));
+        NLU가(작업분석("FILE_SEARCH", Map.of("query", "보고서")));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/file 보고서", null), null);
+
+        // 보내 봐야 Agent 가 SEARCH_FOLDER_NOT_FOUND 로 거절한다. 여기서 끝내는 편이 빠르다.
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.SEARCH_FOLDER_NOT_FOUND.name());
+    }
+
+    @Test
+    @DisplayName("PC 가 꺼져 있어도 폴더가 있으면 접수한다")
+    void 꺼진_PC_도_폴더가_있으면_받는다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        검색폴더가(deviceId, new SearchFolder("sf-1", "문서", SearchFolder.INDEXED));
+        기기상태를(deviceId, DeviceStatus.OFFLINE);
+        NLU가(작업분석("FILE_SEARCH", Map.of("query", "보고서")));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/file 보고서", null), null);
+
+        // 지난 연결에서 보고한 목록을 본다. 그 사이 폴더를 뺐다면 Agent 가 ACK 로 거절한다.
+        assertThat(응답.status()).isEqualTo(TaskStatus.WAITING_FOR_DEVICE);
+        assertThat(파라미터(응답.taskId(), "searchFolderId")).isEqualTo("sf-1");
+    }
+
+    @Test
+    @DisplayName("폴더를 쓰지 않는 작업에는 searchFolderId 를 넣지 않는다")
+    void 다른_작업에는_넣지_않는다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        검색폴더가(deviceId, new SearchFolder("sf-1", "문서", SearchFolder.INDEXED));
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        assertThat(파라미터(응답.taskId(), "searchFolderId")).isNull();
+    }
+
+    private void 검색폴더가(long deviceId, SearchFolder... folders) {
+        deviceSearchFolderRepository.replaceAll(deviceId, List.of(folders));
+    }
+
+    /** 저장된 작업 입력값에서 값 하나를 꺼낸다. 없으면 {@code null}. */
+    private String 파라미터(UUID taskId, String name) {
+        try {
+            JsonNode parameters = objectMapper.readTree(작업조회(taskId).getParameters().data());
+            return parameters.hasNonNull(name) ? parameters.get(name).asText() : null;
+        } catch (Exception e) {
+            throw new AssertionError("작업 입력값을 읽지 못했습니다.", e);
+        }
+    }
+
     @Test
     @DisplayName("NLU 를 부르지 못하면 NLU_UNAVAILABLE 로 마감한다")
     void NLU_장애는_실패로_마감한다() {
@@ -355,7 +469,11 @@ class TaskServiceTest {
     }
 
     private NluAnalyzeResponse 작업분석(String taskType) {
-        return new NluAnalyzeResponse("r", NluDecision.TASK, taskType, Map.of(), List.of(), null, 1.0, "SLASH");
+        return 작업분석(taskType, Map.of());
+    }
+
+    private NluAnalyzeResponse 작업분석(String taskType, Map<String, Object> parameters) {
+        return new NluAnalyzeResponse("r", NluDecision.TASK, taskType, parameters, List.of(), null, 1.0, "SLASH");
     }
 
     private void 기기상태를(long deviceId, DeviceStatus status) {

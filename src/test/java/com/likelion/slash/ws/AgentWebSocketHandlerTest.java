@@ -25,6 +25,8 @@ import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.device.DeviceCapabilityRepository;
 import com.likelion.slash.device.DeviceRepository;
+import com.likelion.slash.device.DeviceSearchFolderRepository;
+import com.likelion.slash.device.SearchFolder;
 import com.likelion.slash.dispatch.AgentDispatchRepository;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
@@ -39,6 +41,7 @@ import java.security.Signature;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,7 +62,7 @@ import org.springframework.web.socket.WebSocketSession;
 /**
  * {@link AgentWebSocketHandler} 확인. (WBS W1-06)
  *
- * <p>계약(slash-agent 의 {@code contracts/src/agentMessages.ts})과 맞는지를 본다. 특히
+ * <p>계약(slash-agent 의 {@code slash_agent/protocol.py}·{@code agent.py})과 맞는지를 본다. 특히
  * <ul>
  *   <li>서명 대상이 {@code challengeId:nonce:deviceId} 문자열인가</li>
  *   <li>RESULT 판정이 {@code status} 문자열인가 (boolean 필드는 계약에 없다)</li>
@@ -96,6 +99,7 @@ class AgentWebSocketHandlerTest {
 
     private final DeviceRepository deviceRepository = mock(DeviceRepository.class);
     private final DeviceCapabilityRepository deviceCapabilityRepository = mock(DeviceCapabilityRepository.class);
+    private final DeviceSearchFolderRepository deviceSearchFolderRepository = mock(DeviceSearchFolderRepository.class);
     private final AgentDispatchRepository agentDispatchRepository = mock(AgentDispatchRepository.class);
     private final TaskService taskService = mock(TaskService.class);
     private final TaskRepository taskRepository = mock(TaskRepository.class);
@@ -107,6 +111,7 @@ class AgentWebSocketHandlerTest {
             new AgentSignatureVerifier(),
             deviceRepository,
             deviceCapabilityRepository,
+            deviceSearchFolderRepository,
             agentDispatchRepository,
             taskService,
             taskRepository,
@@ -378,6 +383,45 @@ class AgentWebSocketHandlerTest {
 
         // PC 가 꺼져 있는 동안 접수된 작업이 나가는 지점이 여기다. (WBS W1-04)
         verify(taskService).dispatchWaiting(기기_PK);
+    }
+
+    @Test
+    @DisplayName("READY 의 검색 폴더를 계약 그대로 읽어 저장한다")
+    void 검색폴더를_저장한다() throws Exception {
+        인증한다();
+
+        // slash-agent 의 file_index.py list_search_folders() 가 내보내는 모양 그대로다.
+        // 실제 경로는 오지 않는다 — Agent 가 자기만 들고 있다.
+        보낸다(프레임("READY",
+                "\"maxConcurrentTasks\":1",
+                "\"supportedTaskTypes\":[\"FILE_SEARCH\"]",
+                "\"searchFolders\":["
+                        + "{\"searchFolderId\":\"sf-1\",\"displayName\":\"문서\",\"indexStatus\":\"INDEXED\"},"
+                        + "{\"searchFolderId\":\"sf-2\",\"displayName\":\"사진\",\"indexStatus\":\"INDEXING\"}]",
+                "\"projectWorkspaces\":[]"));
+
+        ArgumentCaptor<Collection<SearchFolder>> captor = ArgumentCaptor.captor();
+        verify(deviceSearchFolderRepository).replaceAll(eq(기기_PK), captor.capture());
+
+        assertThat(captor.getValue()).containsExactly(
+                new SearchFolder("sf-1", "문서", "INDEXED"),
+                new SearchFolder("sf-2", "사진", "INDEXING"));
+    }
+
+    @Test
+    @DisplayName("검색 폴더가 없다고 보고해도 READY 는 성립한다")
+    void 폴더가_없어도_READY_다() throws Exception {
+        인증한다();
+
+        // /status 만 쓰는 사용자는 폴더를 하나도 등록하지 않는다. 그것 때문에 연결이 막히면 안 된다.
+        보낸다(프레임("READY",
+                "\"maxConcurrentTasks\":1",
+                "\"supportedTaskTypes\":[\"SYSTEM_STATUS\"]",
+                "\"searchFolders\":[]",
+                "\"projectWorkspaces\":[]"));
+
+        verify(deviceSearchFolderRepository).replaceAll(eq(기기_PK), eq(List.of()));
+        verify(deviceRepository).updateConnectionState(기기_PK, DeviceStatus.READY);
     }
 
     @Test
