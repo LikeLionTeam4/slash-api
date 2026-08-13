@@ -42,6 +42,13 @@ jobs:
           distribution: temurin
           java-version: "21"
       - run: ./gradlew --no-daemon test
+      - name: Debug postgres state after test
+        if: always()
+        run: |
+          echo "--- reset_val AFTER gradlew test ---"
+          docker exec postgres psql -U slash -d slash -tAc "SELECT reset_val FROM pg_settings WHERE name='TimeZone';"
+          echo "--- postgres container logs (tail) ---"
+          docker logs postgres 2>&1 | tail -60
       - name: Stop Postgres
         if: always()
         run: docker rm --force postgres || true
