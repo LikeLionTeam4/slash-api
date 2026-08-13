@@ -9,20 +9,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: slash
-          POSTGRES_USER: slash
-          POSTGRES_PASSWORD: slash
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+      # valkey는 command 오버라이드가 필요 없어 services로 충분하다.
       valkey:
-        image: valkey/valkey:7
+        image: valkey/valkey:8-alpine
         ports: ["6379:6379"]
         options: >-
           --health-cmd "valkey-cli ping"
@@ -31,11 +20,28 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+      - name: Start Postgres (docker-compose.yml과 동일 설정)
+        run: |
+          # GitHub Actions의 services: 블록은 command 오버라이드를 지원하지 않는다.
+          # TimeZoneContractTest가 서버 기본 timezone(pg_settings.reset_val)까지
+          # 검사하는데, TZ 환경변수만으로는 이 GUC가 안 바뀌어서(docker-compose.yml
+          # 주석 참고) -c timezone=Asia/Seoul을 직접 커맨드로 넘겨야 한다.
+          docker run --detach --name postgres \
+            --publish 5432:5432 \
+            --env POSTGRES_DB=slash \
+            --env POSTGRES_USER=slash \
+            --env POSTGRES_PASSWORD=slash \
+            --env TZ=Asia/Seoul \
+            postgres:16 postgres -c timezone=Asia/Seoul
+          until docker exec postgres pg_isready -U slash -d slash; do sleep 1; done
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
       - run: ./gradlew --no-daemon test
+      - name: Stop Postgres
+        if: always()
+        run: docker rm --force postgres || true
 
   container-build:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'
