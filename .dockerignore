@@ -1,0 +1,19 @@
+# 빌드 컨텍스트에서 제외한다. 이미지 크기보다 "실수로 들어가는 것"을 막는 목적이 크다.
+
+# 자격증명 — 이미지에 절대 들어가면 안 된다.
+.env
+
+# 빌드 산출물. 컨테이너 안에서 새로 만든다. 호스트 것이 섞이면 오래된 클래스가 들어간다.
+build/
+.gradle/
+
+.git/
+.github/
+.idea/
+*.iml
+
+docs/
+README.md
+docker-compose.yml
+Dockerfile
+.dockerignore
