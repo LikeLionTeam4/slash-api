@@ -11,6 +11,7 @@ import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.common.error.SlashException;
 import com.likelion.slash.device.DeviceRepository;
+import com.likelion.slash.device.DeviceSearchFolderRepository;
 import com.likelion.slash.dispatch.TaskDispatcher;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import com.likelion.slash.jooq.tables.records.IdempotencyRecordsRecord;
@@ -21,6 +22,7 @@ import com.likelion.slash.task.dto.CreateRequestRequest;
 import com.likelion.slash.task.dto.CreateRequestResponse;
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -57,6 +59,9 @@ public class TaskService {
     /** 이력 목록에 보여줄 요약 길이. */
     private static final int SUMMARY_LENGTH = 80;
 
+    /** FILE_SEARCH 의 서버가 채우는 입력값. Agent 가 READY 로 보고한 폴더 중 하나를 넣는다. */
+    private static final String PARAMETER_SEARCH_FOLDER_ID = "searchFolderId";
+
     /** 멱등 기록의 범위. 같은 키라도 다른 Endpoint 면 별개로 본다. */
     private static final String REQUEST_PATH = "/api/v1/requests";
 
@@ -67,6 +72,7 @@ public class TaskService {
     private final TaskStateWriter stateWriter;
     private final IdempotencyRecordRepository idempotencyRecordRepository;
     private final DeviceRepository deviceRepository;
+    private final DeviceSearchFolderRepository deviceSearchFolderRepository;
     private final NluClient nluClient;
     private final TaskDispatcher taskDispatcher;
     private final ObjectMapper objectMapper;
@@ -75,6 +81,7 @@ public class TaskService {
                        TaskStateWriter stateWriter,
                        IdempotencyRecordRepository idempotencyRecordRepository,
                        DeviceRepository deviceRepository,
+                       DeviceSearchFolderRepository deviceSearchFolderRepository,
                        NluClient nluClient,
                        TaskDispatcher taskDispatcher,
                        ObjectMapper objectMapper) {
@@ -82,6 +89,7 @@ public class TaskService {
         this.stateWriter = stateWriter;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.deviceRepository = deviceRepository;
+        this.deviceSearchFolderRepository = deviceSearchFolderRepository;
         this.nluClient = nluClient;
         this.taskDispatcher = taskDispatcher;
         this.objectMapper = objectMapper;
@@ -302,6 +310,13 @@ public class TaskService {
             return TaskStatus.FAILED;
         }
 
+        Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
+
+        // NLU 가 채우지 않는 값을 서버가 채운다. 채우지 못하면 실행할 수 없으므로 여기서 마감한다.
+        if (!fillBackendProvided(task, taskType, device, parameters)) {
+            return TaskStatus.FAILED;
+        }
+
         boolean ready = DeviceStatus.READY.name().equals(device.getStatus());
         TaskStatus next = ready ? TaskStatus.QUEUED : TaskStatus.WAITING_FOR_DEVICE;
         String message = ready ? "PC 로 작업을 보냈습니다." : "PC 가 연결되면 실행합니다.";
@@ -311,7 +326,7 @@ public class TaskService {
                 taskType,
                 ProcessingRoute.LOCAL_AGENT,
                 device.getId(),
-                toJsonb(nlu.parametersOrEmpty()),
+                toJsonb(parameters),
                 summarize(task.getInputText()),
                 next,
                 null,
@@ -464,6 +479,47 @@ public class TaskService {
         } catch (IllegalArgumentException e) {
             return Optional.empty();
         }
+    }
+
+    /**
+     * NLU 가 채우지 않는 필수 입력값을 서버가 채운다. ({@link TaskType#backendProvidedParameters()})
+     *
+     * <p>검색 폴더처럼 <b>사용자가 PC 에 미리 등록해 둔 목록에서 고르는 값</b>이라 자연어에서
+     * 뽑아낼 수 없다. NLU 는 이 값을 반환하지도, 누락으로 보고하지도 않는다.
+     *
+     * <p><b>고르는 시점이 접수 시점인 것에 유의한다.</b> PC 가 꺼져 있으면 지난 연결에서 보고한
+     * 목록을 보게 되는데, 그 사이 사용자가 폴더를 뺐다면 이미 없는 식별자를 보내게 된다.
+     * 그 경우 Agent 가 {@code SEARCH_FOLDER_NOT_FOUND} 로 거절하므로 조용히 틀리지는 않는다.
+     * 전달 시점으로 미루려면 이미 저장된 작업 입력값을 다시 써야 해서 지금은 접수 시점에 고른다.
+     *
+     * <p><b>지금 채우는 것은 {@code searchFolderId} 하나뿐이다.</b> CODE_ANALYSIS 의
+     * {@code workspaceId} 도 같은 자리(P1)인데 저장할 표가 없어 채우지 못한다. 그 경우 값 없이
+     * 나가고 Agent 가 {@code WORKSPACE_NOT_FOUND} 로 거절한다. 표가 생기면 여기에 한 줄 더 붙는다.
+     *
+     * @return 채웠으면 참. 거짓이면 채우지 못해 작업을 이미 실패로 마감했다
+     */
+    private boolean fillBackendProvided(TasksRecord task,
+                                        TaskType taskType,
+                                        DevicesRecord device,
+                                        Map<String, Object> parameters) {
+
+        if (!taskType.backendProvidedParameters().contains(PARAMETER_SEARCH_FOLDER_ID)) {
+            return true;
+        }
+
+        Optional<String> searchFolderId = deviceSearchFolderRepository.pickSearchable(device.getId());
+        if (searchFolderId.isEmpty()) {
+            // 폴더를 한 번도 보고받지 못했거나, 있어도 전부 읽을 수 없는(UNAVAILABLE) 상태다.
+            // 둘을 구분해 알리지 않는다. 사용자가 할 일은 어느 쪽이든 Agent 에서 폴더를 확인하는 것이다.
+            // 색인 중인 폴더는 여기 오지 않는다 — Agent 가 검색해 주므로 그대로 내보낸다.
+            log.debug("검색할 폴더가 없다 taskId={} deviceId={}", task.getPublicId(), device.getId());
+            stateWriter.fail(task.getId(), TaskStatus.ANALYZING, ErrorCode.SEARCH_FOLDER_NOT_FOUND,
+                    "PC 에 검색할 수 있는 폴더가 없습니다. Agent 에서 폴더를 추가해 주세요.");
+            return false;
+        }
+
+        parameters.put(PARAMETER_SEARCH_FOLDER_ID, searchFolderId.get());
+        return true;
     }
 
     private JSONB toJsonb(Map<String, Object> parameters) {
