@@ -34,6 +34,9 @@ jobs:
             --env TZ=Asia/Seoul \
             postgres:16 postgres -c timezone=Asia/Seoul
           until docker exec postgres pg_isready -U slash -d slash; do sleep 1; done
+          echo "--- debug: reset_val for TimeZone ---"
+          docker exec postgres psql -U slash -d slash -tAc "SELECT reset_val FROM pg_settings WHERE name='TimeZone';"
+          docker exec postgres printenv TZ
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
