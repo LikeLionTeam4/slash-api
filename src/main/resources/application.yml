@@ -98,6 +98,17 @@ slash:
     # 기기 Token 유효기간 (문서 3.5.2)
     token-ttl: 24h
 
+    # 연결이 끊긴 기기를 OFFLINE 으로 내리는 스윕.
+    #
+    # 연결이 끊겨도 Agent 가 알려줄 수 없다. 이 스윕이 없으면 꺼진 PC 가 READY 로 남아
+    # 작업이 그리로 전달되고, 기기 목록에도 켜져 있는 것처럼 보인다.
+    offline-sweep:
+      # @Scheduled 의 문자열 값은 30s 같은 표기를 해석하지 못해 여기만 밀리초로 적는다.
+      #
+      # offline-threshold(90초)보다 촘촘해야 판정이 그 값에 가깝게 유지된다. 실제 지연은
+      # 최대 threshold + interval 이다. 조회가 무겁지 않아 30초면 충분하다.
+      interval-ms: 30000
+
   pairing:
     # 등록 코드 5분·1회용 (문서 DV-01)
     code-ttl: 5m
