@@ -196,6 +196,30 @@ public class DeviceRepository {
     }
 
     /**
+     * 새 작업을 받을지 켜고 끈다. ({@code If-Match} 로 받은 version 이 현재 값과 같을 때만) (#24)
+     *
+     * <p>사용자가 일으킨 변경이므로 version 을 올린다. 낡은 화면이 이 값을 되돌리지 못한다.
+     *
+     * <p>해제한 기기는 대상이 아니다. 켜 두어도 어차피 작업이 나가지 않아 사용자가 잘못 이해하게 된다.
+     *
+     * @return 갱신된 기기. 비어 있으면 대상이 없거나 version 이 어긋난 것이다.
+     */
+    public Optional<DevicesRecord> setAcceptingTasks(UUID publicId,
+                                                     long userId,
+                                                     boolean accepting,
+                                                     int expectedVersion) {
+        return dsl.update(DEVICES)
+                .set(DEVICES.ACCEPTING_TASKS, accepting)
+                .set(DEVICES.VERSION, DEVICES.VERSION.plus(1))
+                .where(DEVICES.PUBLIC_ID.eq(publicId))
+                .and(DEVICES.USER_ID.eq(userId))
+                .and(DEVICES.VERSION.eq(expectedVersion))
+                .and(DEVICES.STATUS.ne(DeviceStatus.REVOKED.name()))
+                .returning()
+                .fetchOptional();
+    }
+
+    /**
      * 연결을 해제한다. 행을 지우지 않고 {@code REVOKED} 로 남겨 작업 이력의 FK 를 보존한다.
      *
      * <p>{@code ck_devices_revoked_at} 때문에 해제 시각을 반드시 함께 채운다.

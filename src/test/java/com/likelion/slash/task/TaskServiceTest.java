@@ -2,6 +2,7 @@ package com.likelion.slash.task;
 
 import static com.likelion.slash.jooq.Tables.AGENT_DISPATCHES;
 import static com.likelion.slash.jooq.Tables.DEVICES;
+import static com.likelion.slash.jooq.Tables.TASK_EVENTS;
 import static com.likelion.slash.jooq.Tables.TASKS;
 import static com.likelion.slash.support.TestFixtures.사용자;
 import static com.likelion.slash.support.TestFixtures.준비된_기기;
@@ -358,6 +359,84 @@ class TaskServiceTest {
         assertThat(파라미터(응답.taskId(), "searchFolderId")).isEqualTo("sf-1");
     }
 
+    // ------------------------------------------------------------------
+    // 작업 수신 중지 (#24)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("수신을 꺼 두면 붙어 있어도 보내지 않고 기다린다")
+    void 수신을_끄면_기다린다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        수신을(deviceId, false);
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        // 실패로 마감하지 않는다. 다시 켜면 나가야 하므로 꺼진 PC 와 같은 자리에 둔다.
+        assertThat(응답.status()).isEqualTo(TaskStatus.WAITING_FOR_DEVICE);
+        verify(taskDispatcher, never()).dispatch(any(), anyLong());
+
+        // 꺼진 PC 와 구분해 알린다. 켜져 있는 PC 를 두고 무엇을 기다려야 하는지 알 수 있어야 한다.
+        assertThat(마지막_안내(응답.taskId())).contains("수신");
+    }
+
+    @Test
+    @DisplayName("꺼져 있으면서 수신도 꺼 둔 PC 는 연결부터 안내한다")
+    void 꺼진_PC_는_연결을_먼저_안내한다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        수신을(deviceId, false);
+        기기상태를(deviceId, DeviceStatus.OFFLINE);
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        // 둘 다 풀어야 실행된다. 수신만 켜라고 하면 그대로 했는데도 아무 일이 없는 것으로 보인다.
+        assertThat(마지막_안내(응답.taskId())).contains("연결");
+    }
+
+    @Test
+    @DisplayName("수신을 꺼 둔 기기에는 밀린 작업도 내보내지 않는다")
+    void 수신을_끄면_밀린_작업도_멈춘다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        기기상태를(deviceId, DeviceStatus.OFFLINE);
+        NLU가(작업분석("SYSTEM_STATUS"));
+        taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        기기상태를(deviceId, DeviceStatus.READY);
+        수신을(deviceId, false);
+
+        // 접수 경로에서만 막으면 꺼 두기 전에 쌓인 작업이 재연결과 함께 쏟아진다.
+        assertThat(taskService.dispatchWaiting(deviceId)).isZero();
+    }
+
+    @Test
+    @DisplayName("다시 켜면 기다리던 작업이 나간다")
+    void 다시_켜면_나간다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        수신을(deviceId, false);
+        NLU가(작업분석("SYSTEM_STATUS"));
+        UUID taskId = taskService.accept(사용자, new CreateRequestRequest("/status", null), null).taskId();
+
+        수신을(deviceId, true);
+
+        assertThat(taskService.dispatchWaiting(deviceId)).isEqualTo(1);
+        assertThat(작업조회(taskId).getStatus()).isEqualTo(TaskStatus.QUEUED.name());
+    }
+
+    @Test
+    @DisplayName("수신을 꺼 둔 PC 보다 받는 PC 를 먼저 고른다")
+    void 받는_PC_를_먼저_고른다() {
+        long 꺼둔_기기 = 준비된_기기(dsl, 사용자.id());
+        수신을(꺼둔_기기, false);
+        long 받는_기기 = 준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("SYSTEM_STATUS"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/status", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+        assertThat(작업조회(응답.taskId()).getDeviceId()).isEqualTo(받는_기기);
+    }
+
     @Test
     @DisplayName("폴더를 쓰지 않는 작업에는 searchFolderId 를 넣지 않는다")
     void 다른_작업에는_넣지_않는다() {
@@ -478,6 +557,20 @@ class TaskServiceTest {
 
     private void 기기상태를(long deviceId, DeviceStatus status) {
         dsl.update(DEVICES).set(DEVICES.STATUS, status.name()).where(DEVICES.ID.eq(deviceId)).execute();
+    }
+
+    /** 타임라인에 마지막으로 남은 안내 문구. 화면이 사용자에게 보여주는 값이다. */
+    private String 마지막_안내(UUID taskId) {
+        return dsl.select(TASK_EVENTS.MESSAGE)
+                .from(TASK_EVENTS)
+                .where(TASK_EVENTS.TASK_ID.eq(작업조회(taskId).getId()))
+                .orderBy(TASK_EVENTS.SEQUENCE.desc())
+                .limit(1)
+                .fetchOne(TASK_EVENTS.MESSAGE);
+    }
+
+    private void 수신을(long deviceId, boolean accepting) {
+        dsl.update(DEVICES).set(DEVICES.ACCEPTING_TASKS, accepting).where(DEVICES.ID.eq(deviceId)).execute();
     }
 
     private TasksRecord 작업조회(UUID publicId) {

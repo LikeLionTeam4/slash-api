@@ -317,9 +317,9 @@ public class TaskService {
             return TaskStatus.FAILED;
         }
 
-        boolean ready = DeviceStatus.READY.name().equals(device.getStatus());
+        boolean ready = acceptsTask(device);
         TaskStatus next = ready ? TaskStatus.QUEUED : TaskStatus.WAITING_FOR_DEVICE;
-        String message = ready ? "PC 로 작업을 보냈습니다." : "PC 가 연결되면 실행합니다.";
+        String message = ready ? "PC 로 작업을 보냈습니다." : waitingMessage(device);
 
         boolean applied = stateWriter.applyAnalysisAndMove(
                 task.getId(),
@@ -381,19 +381,43 @@ public class TaskService {
      * 실행할 기기를 고른다.
      *
      * <p>사용자가 골랐으면 그것을 쓰고, 아니면 등록된 PC 중에서 정한다. 지금은 P0 라
-     * 한 대만 쓰는 것을 전제로 하되, 여러 대가 있으면 <b>연결돼 있는 것</b>을 먼저 고른다.
-     * 꺼진 PC 를 골라 놓고 기다리게 하는 것보다 낫다.
+     * 한 대만 쓰는 것을 전제로 하되, 여러 대가 있으면 <b>지금 작업을 받는 것</b>을 먼저 고른다.
+     * 꺼져 있거나 수신을 꺼 둔 PC 를 골라 놓고 기다리게 하는 것보다 낫다.
      */
     private Optional<DevicesRecord> resolveDevice(AuthenticatedUser user, UUID selectedDeviceId) {
         if (selectedDeviceId != null) {
             return deviceRepository.findByPublicIdAndUserId(selectedDeviceId, user.id());
         }
 
-        return deviceRepository.findAllByUserId(user.id()).stream()
-                .filter(device -> !DeviceStatus.REVOKED.name().equals(device.getStatus()))
+        return deviceRepository.findActiveByUserId(user.id()).stream()
                 .min(Comparator
-                        .comparing((DevicesRecord device) -> DeviceStatus.READY.name().equals(device.getStatus()) ? 0 : 1)
+                        .comparing((DevicesRecord device) -> acceptsTask(device) ? 0 : 1)
                         .thenComparing(DevicesRecord::getId, Comparator.reverseOrder()));
+    }
+
+    /**
+     * 지금 이 기기로 작업을 보낼 수 있는가.
+     *
+     * <p>연결 상태와 <b>사용자가 켜 둔 수신 여부</b>를 함께 본다. PC 가 붙어 있어도 사용자가
+     * 작업 수신을 꺼 두었으면 보내지 않는다. ({@code devices.accepting_tasks} · #24)
+     */
+    private static boolean acceptsTask(DevicesRecord device) {
+        return DeviceStatus.valueOf(device.getStatus()).canAcceptTask(device.getAcceptingTasks());
+    }
+
+    /**
+     * 곧바로 보내지 못할 때 사용자에게 알릴 말.
+     *
+     * <p>꺼진 PC 와 수신을 꺼 둔 PC 를 구분한다. 둘 다 "PC 가 연결되면 실행합니다" 로 안내하면,
+     * 정지해 둔 사용자는 이미 켜져 있는 PC 를 두고 무엇을 더 기다려야 하는지 알 수 없다.
+     *
+     * <p><b>연결을 먼저 말한다.</b> 꺼져 있으면서 수신도 꺼 둔 PC 는 둘 다 풀어야 실행되는데,
+     * 수신만 켜라고 안내하면 그대로 했는데도 아무 일이 없는 것으로 보인다.
+     */
+    private static String waitingMessage(DevicesRecord device) {
+        return DeviceStatus.READY.name().equals(device.getStatus())
+                ? "PC 가 작업 수신을 다시 켜면 실행합니다."
+                : "PC 가 연결되면 실행합니다.";
     }
 
     // ------------------------------------------------------------------
@@ -413,6 +437,15 @@ public class TaskService {
      * @return 내보낸 건수 (0 또는 1)
      */
     public int dispatchWaiting(long deviceId) {
+        // 사용자가 수신을 꺼 두었으면 붙어 있어도 보내지 않는다. 접수 경로에서만 막으면
+        // 꺼 두기 전에 쌓인 작업이 재연결과 함께 쏟아진다. (#24)
+        if (deviceRepository.findById(deviceId)
+                .map(device -> !Boolean.TRUE.equals(device.getAcceptingTasks()))
+                .orElse(true)) {
+            log.debug("작업 수신이 꺼져 있어 대기 작업을 내보내지 않는다 deviceId={}", deviceId);
+            return 0;
+        }
+
         if (taskRepository.isDeviceOccupied(deviceId)) {
             log.debug("기기가 이미 작업을 붙들고 있어 대기 작업을 내보내지 않는다 deviceId={}", deviceId);
             return 0;

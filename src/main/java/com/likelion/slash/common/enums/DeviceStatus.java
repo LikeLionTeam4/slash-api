@@ -20,8 +20,16 @@ public enum DeviceStatus {
     /** 사용자가 등록을 해제해 Token 이 무효 */
     REVOKED;
 
-    /** 새 작업을 전송할 수 있는 상태인지 확인한다. (문서 DV-05) */
-    public boolean canAcceptTask() {
-        return this == READY;
+    /**
+     * 새 작업을 전송할 수 있는지 확인한다. (문서 DV-05)
+     *
+     * <p><b>두 가지를 함께 본다.</b> 연결 상태만으로는 부족하다. 사용자가 PC 를 등록해 둔 채로
+     * 작업 수신을 꺼 둘 수 있고({@code devices.accepting_tasks}), 그때는 붙어 있어도 보내지 않는다.
+     * 둘을 따로 확인하면 한쪽을 빠뜨린 곳이 생긴다.
+     *
+     * @param acceptingTasks {@code devices.accepting_tasks} — 사용자가 켜 둔 수신 여부
+     */
+    public boolean canAcceptTask(boolean acceptingTasks) {
+        return this == READY && acceptingTasks;
     }
 }
