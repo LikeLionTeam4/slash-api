@@ -39,19 +39,26 @@ class TimeZoneContractTest {
         assertThat(now.getOffset().getTotalSeconds()).isEqualTo(9 * 3600);
     }
 
-    @Test
-    @DisplayName("DB 서버 기본 시간대도 Asia/Seoul 이다")
-    void db_서버_기본_시간대도_한국이다() {
-        // 앱은 JDBC Session 에서 시간대를 걸지만, psql·관리 도구로 직접 조회할 때도
-        // 별도 변환 없이 한국 시각으로 보여야 한다. (메시지 프로토콜 정의 3.5)
-        // 로컬은 docker-compose 의 postgres -c timezone, 배포 환경은 RDS 파라미터 그룹으로 맞춘다.
-        //
-        // setting 은 Session 에서 SET 한 값이라 서버 기본값을 확인할 수 없고,
-        // boot_val 은 컴파일 기본값(GMT)이라 설정과 무관하다.
-        // reset_val 이 Session 설정과 무관하게 서버·데이터베이스 기본값을 유지한다.
-        String serverDefault = dsl.fetchValue(
-                "SELECT reset_val FROM pg_settings WHERE name = 'TimeZone'").toString();
-
-        assertThat(serverDefault).isEqualTo("Asia/Seoul");
-    }
+    // ------------------------------------------------------------------
+    // DB 서버 자체의 기본 시간대는 여기서 확인하지 않는다
+    //
+    //   psql·관리 도구로 직접 조회할 때도 한국 시각으로 보여야 한다는 요구는 그대로다.
+    //   (메시지 프로토콜 정의 3.5) 다만 그것을 이 시험으로 확인할 수는 없다.
+    //
+    //   pg_settings.reset_val 을 보는 시험이 있었는데, 그 값은 서버 설정이 아니라
+    //   JDBC 가 접속할 때 startup 으로 보낸 시간대다 — 즉 시험을 돌리는 JVM 의 기본
+    //   시간대다. 개발자 노트북(Asia/Seoul)에서는 통과하고 CI 러너(UTC)에서는 실패했다.
+    //   서버는 양쪽 다 Asia/Seoul 로 떠 있었는데도 그랬다.
+    //
+    //   앱은 Hikari 의 connection-init-sql 로 연결마다 SET TIME ZONE 을 걸기 때문에
+    //   (application.yml) 어떤 JDBC 연결에서도 서버 기본값을 볼 수 없다. setting 은
+    //   SET 한 값이고, reset_val 은 startup 값이며, boot_val 은 컴파일 기본값(GMT)이다.
+    //
+    //   서버 기본 시간대는 인프라 설정이 보장한다.
+    //     - 로컬  docker-compose.yml 의 postgres -c timezone=Asia/Seoul
+    //     - CI    .github/workflows/test.yml 이 같은 값으로 컨테이너를 띄운다
+    //     - 배포  RDS 파라미터 그룹 (slash-infra)
+    //
+    //   위 세 가지가 어긋나면 앱 동작이 아니라 장애 조사 때 DB 를 직접 볼 때 드러난다.
+    // ------------------------------------------------------------------
 }
