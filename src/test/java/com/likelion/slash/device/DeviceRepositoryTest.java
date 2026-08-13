@@ -10,6 +10,7 @@ import com.likelion.slash.common.enums.DeviceArchitecture;
 import com.likelion.slash.common.enums.DeviceOs;
 import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.TaskType;
+import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import java.util.List;
 import java.util.UUID;
 import org.jooq.DSLContext;
@@ -52,6 +53,53 @@ class DeviceRepositoryTest {
 
         assertThat(deviceRepository.findByPublicIdAndUserId(publicId, 주인)).isPresent();
         assertThat(deviceRepository.findByPublicIdAndUserId(publicId, 남)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("목록에도 남의 기기는 섞이지 않는다")
+    void 목록은_내_기기만_담는다() {
+        long 주인 = 사용자(dsl);
+        long 남 = 사용자(dsl);
+        준비된_기기(dsl, 남);
+
+        assertThat(deviceRepository.findActiveByUserId(주인)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("해제한 기기는 화면 목록에서 빠진다 — 이력 조회에는 남는다")
+    void 해제한_기기는_목록에서_빠진다() {
+        long userId = 사용자(dsl);
+        long 남길_기기 = 준비된_기기(dsl, userId);
+        long 해제할_기기 = 준비된_기기(dsl, userId);
+        해제한다(해제할_기기);
+
+        // 등록 화면이 목록 길이로 한도를 판단한다. 해제한 기기가 섞이면 더 등록할 수 있는데도 막힌다.
+        assertThat(deviceRepository.findActiveByUserId(userId))
+                .singleElement()
+                .satisfies(device -> assertThat(device.getId()).isEqualTo(남길_기기));
+
+        // 행 자체는 남아 있어야 한다. 작업 이력이 기기를 참조한다.
+        assertThat(deviceRepository.findAllByUserId(userId)).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("목록은 최근 등록한 것이 앞에 온다")
+    void 목록은_최근_등록순이다() {
+        long userId = 사용자(dsl);
+        long 먼저 = 준비된_기기(dsl, userId);
+        long 나중 = 준비된_기기(dsl, userId);
+
+        assertThat(deviceRepository.findActiveByUserId(userId))
+                .extracting(DevicesRecord::getId)
+                .containsExactly(나중, 먼저);
+    }
+
+    private void 해제한다(long deviceId) {
+        dsl.update(DEVICES)
+                .set(DEVICES.STATUS, DeviceStatus.REVOKED.name())
+                .set(DEVICES.REVOKED_AT, SlashTime.now())
+                .where(DEVICES.ID.eq(deviceId))
+                .execute();
     }
 
     // ------------------------------------------------------------------
