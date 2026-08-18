@@ -259,13 +259,13 @@ Agent 수신:  {"type":"TASK","dispatchId":"da0c61e7-…","taskType":"FILE_SEARC
 ## 8. 프레임 계약 정렬 (2026-08-06)
 
 처음 구현할 때는 프레임 필드 이름을 스키마에서 유추했다. 이후 **실제 계약이 코드로 존재한다**는
-것을 확인했다. 문서 저장소가 아니라 slash-agent 안에 있다.
+것을 확인했다. 문서 저장소가 아니라 slash-agent(현 slash-runner) 안에 있다.
 
 | 무엇 | 어디 |
 |---|---|
-| 계약 원본 (zod 스키마) | `slash-agent/contracts/src/agentMessages.ts` |
+| 계약 원본 (zod 스키마, 2026-08-06 당시) | `slash-agent/contracts/src/agentMessages.ts` — 이후 Python 전환으로 삭제됨. 현재는 `slash-runner`의 `protocol.py`(메시지 상수)가 그 역할을 한다 |
 | 서버 쪽 참조 구현 | `slash-api` 의 `slash-api-test` 브랜치 `mock-api/src/agentWss.ts` |
-| 실제 주고받는 JSON 예시 | `slash-agent/docs/MESSAGE_GUIDE.md` |
+| 실제 주고받는 JSON 예시 | `slash-runner/docs/MESSAGE_GUIDE.md` |
 
 **앞으로 계약을 확인할 때는 여기를 먼저 본다.** `slash-docs` 에는 아직 없다.
 
@@ -311,7 +311,7 @@ ACK 가 왔다는 것은 프레임이 나갔다는 뜻이므로, PENDING 상태�
       `preStop` 지연(5.5)은 별건으로 요청합니다 — 이건 무중단 배포에 실제로 필요합니다.
 - [ ] **HPA 최대 replica 수.** B안으로 언제 승급할지의 판단 기준입니다.
       대략 **4 이하면 A 로 충분**하고, 그 이상이면 B 를 넣는 편이 낫습니다.
-- [x] **slash-agent** — 재연결 시 미완료 전달 재수신, 같은 전달 중복 무시.
+- [x] **slash-runner**(구 slash-agent) — 재연결 시 미완료 전달 재수신, 같은 전달 중복 무시.
       **이미 구현되어 있습니다** (2026-08-06 확인). `taskId:dispatchId` 를 키로 캐시해 재실행 없이
       기존 ACK·RESULT 를 돌려주고, 재연결 시 `resendUnackedResults` 로 다시 보냅니다.
       다만 **Agent 는 `RESULT_ACK` 를 받아야 그 캐시를 지웁니다.** 우리가 아직 보내지 않으므로
