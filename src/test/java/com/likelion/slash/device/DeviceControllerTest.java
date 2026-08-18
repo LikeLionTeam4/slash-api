@@ -319,6 +319,26 @@ class DeviceControllerTest {
     }
 
     @Test
+    @DisplayName("수신 설정 응답도 목록과 같은 모양이다 — 검색 폴더를 함께 준다")
+    void 수신_설정_응답에도_폴더가_온다() throws Exception {
+        long userId = 로그인한_사용자("alice");
+        long deviceId = 준비된_기기(dsl, userId);
+        searchFolderRepository.replaceAll(deviceId,
+                List.of(new SearchFolder("sf-work", "업무 문서", SearchFolder.INDEXED)));
+
+        // 화면은 이 응답으로 목록의 한 줄을 갱신한다. 여기서만 폴더가 비어 있으면
+        // 토글을 누르는 순간 그 줄의 폴더 이름이 사라진다.
+        mockMvc.perform(patch("/api/v1/devices/{id}/task-intake", 공개식별자(deviceId))
+                        .header("Authorization", "Bearer alice")
+                        .header("If-Match", "\"0\"")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accepting\": false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.searchFolders", Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.data.searchFolders[0].displayName").value("업무 문서"));
+    }
+
+    @Test
     @DisplayName("다시 켤 수 있다 — 해제와 달리 되돌릴 수 있다")
     void 다시_켠다() throws Exception {
         long userId = 로그인한_사용자("alice");
