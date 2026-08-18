@@ -35,6 +35,7 @@ import com.likelion.slash.task.TaskRepository;
 import com.likelion.slash.task.TaskService;
 import com.likelion.slash.task.TaskStateWriter;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.Signature;
@@ -115,7 +116,8 @@ class AgentWebSocketHandlerTest {
             agentDispatchRepository,
             taskService,
             taskRepository,
-            stateWriter);
+            stateWriter,
+            Duration.ofMinutes(5));
 
     private KeyPair 기기_키쌍;
     private WebSocketSession session;
@@ -584,7 +586,7 @@ class AgentWebSocketHandlerTest {
 
         보낸다(프레임("ACK", "\"dispatchId\":\"" + dispatchId + "\"", "\"accepted\":true"));
 
-        verify(agentDispatchRepository).acknowledge(7L);
+        verify(agentDispatchRepository).acknowledge(eq(7L), any());
         verify(stateWriter).move(eq(작업_PK), eq(TaskStatus.QUEUED), eq(TaskStatus.RUNNING), isNull(), any());
     }
 
@@ -602,7 +604,7 @@ class AgentWebSocketHandlerTest {
         // 원장만 마감하면 작업은 QUEUED 로 굳어 끝나지 않는 진행 표시로 남는다.
         verify(agentDispatchRepository).fail(7L, "TASK_TYPE_NOT_SUPPORTED");
         verify(stateWriter).failFromAgent(eq(작업_PK), eq(ErrorCode.TASK_TYPE_NOT_SUPPORTED), any());
-        verify(agentDispatchRepository, never()).acknowledge(anyLong());
+        verify(agentDispatchRepository, never()).acknowledge(anyLong(), any());
     }
 
     @Test
