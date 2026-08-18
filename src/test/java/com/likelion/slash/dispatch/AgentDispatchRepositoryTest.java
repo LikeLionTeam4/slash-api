@@ -5,10 +5,13 @@ import static com.likelion.slash.support.TestFixtures.작업;
 import static com.likelion.slash.support.TestFixtures.준비된_기기;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 import static com.likelion.slash.jooq.Tables.AGENT_DISPATCHES;
 
 import com.likelion.slash.common.SlashTime;
+import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import com.likelion.slash.common.enums.AgentDispatchStatus;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import com.likelion.slash.common.enums.TaskStatus;
@@ -152,17 +155,23 @@ class AgentDispatchRepositoryTest {
         long userId = 사용자(dsl);
         long deviceId = 준비된_기기(dsl, userId);
         long taskId = 작업(dsl, userId, deviceId, TaskStatus.QUEUED.name());
-        var dispatch = agentDispatchRepository.create(taskId, deviceId, SlashTime.now().plusSeconds(60));
+        var 전달_기한 = SlashTime.now().plusSeconds(60);
+        var dispatch = agentDispatchRepository.create(taskId, deviceId, 전달_기한);
 
-        var 실행_기한 = SlashTime.now().plusMinutes(5);
+        // 나노초를 일부러 채운다. timestamptz 는 마이크로초까지만 담고 그 아래를 반올림하는데,
+        // Linux JVM 은 나노초까지 만들어 내고 macOS 는 마이크로초에서 끊는다. 그대로 두면
+        // 저장한 값과 읽은 값이 어긋나는 상황이 CI 에서만 생겨 로컬에서는 보이지 않는다.
+        var 실행_기한 = SlashTime.now().plusMinutes(5).withNano(123_456_789);
         agentDispatchRepository.acknowledge(dispatch.getId(), 실행_기한);
 
         // 전달 기한(60초)은 전달이 도달하는 데 주는 시간이다. 그 값으로 실행까지 재면
         // 오래 걸리는 작업이 실행 도중 만료되고, PC 가 끝내고 보낸 결과가 버려진다.
-        assertThat(agentDispatchRepository.findByPublicId(dispatch.getPublicId()))
-                .get()
-                .extracting(record -> record.getExpiresAt())
-                .isEqualTo(실행_기한);
+        OffsetDateTime 저장된_기한 = agentDispatchRepository
+                .findByPublicId(dispatch.getPublicId()).orElseThrow().getExpiresAt();
+
+        assertThat(저장된_기한)
+                .isAfter(전달_기한)
+                .isCloseTo(실행_기한, within(1, ChronoUnit.MILLIS));
     }
 
     @Test
