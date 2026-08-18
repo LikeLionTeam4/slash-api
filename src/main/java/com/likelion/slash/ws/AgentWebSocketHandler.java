@@ -182,11 +182,19 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
      */
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws IOException {
-        Optional<DevicesRecord> device = deviceToken(session)
-                .flatMap(token -> deviceRepository.findByActiveTokenHash(Sha256.hex(token), SlashTime.now()));
+        Optional<String> token = deviceToken(session);
+        Optional<DevicesRecord> device = token
+                .flatMap(value -> deviceRepository.findByActiveTokenHash(Sha256.hex(value), SlashTime.now()));
 
         if (device.isEmpty()) {
-            fail(session, AgentProtocol.ERROR_AUTHENTICATION_FAILED, "invalid or missing device token", null, true);
+            // 거부하는 이유를 가려서 알려준다. 해제된 기기에 AUTHENTICATION_FAILED 를 주면
+            // Agent 는 그것을 Token 문제로 보고 재접속을 반복한다 — 등록을 해제한 목적이
+            // 재연결을 영구히 막는 것인데 그 신호가 전달되지 않는다. (이슈 #26)
+            boolean revoked = revoked(token);
+            fail(session,
+                    revoked ? AgentProtocol.ERROR_DEVICE_REVOKED : AgentProtocol.ERROR_AUTHENTICATION_FAILED,
+                    revoked ? "device revoked" : "invalid or missing device token",
+                    null, true);
             return;
         }
 
@@ -221,6 +229,19 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                         parameter.substring(TOKEN_QUERY_PARAMETER.length() + 1), StandardCharsets.UTF_8))
                 .filter(token -> !token.isBlank())
                 .findFirst();
+    }
+
+    /**
+     * 이 Token 의 주인이 등록 해제된 기기인지 본다.
+     *
+     * <p><b>접속을 거부하기로 정한 뒤에만 부른다.</b> 정상 접속은 {@code findByActiveTokenHash}
+     * 한 번으로 끝나고, 질의가 하나 느는 것은 거부하는 경우뿐이다.
+     */
+    private boolean revoked(Optional<String> token) {
+        return token
+                .flatMap(value -> deviceRepository.findByTokenHash(Sha256.hex(value)))
+                .map(device -> DeviceStatus.REVOKED.name().equals(device.getStatus()))
+                .orElse(false);
     }
 
     @Override

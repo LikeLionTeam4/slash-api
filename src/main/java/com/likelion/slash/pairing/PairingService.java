@@ -296,7 +296,9 @@ public class PairingService {
                 .orElseThrow(() -> new SlashException(ErrorCode.AUTH_REQUIRED));
 
         if (DeviceStatus.REVOKED.name().equals(device.getStatus())) {
-            throw new SlashException(ErrorCode.FORBIDDEN);
+            // 재접속하는 Agent 가 가장 먼저 닿는 곳이다. 여기서 사유를 뭉뚱그리면
+            // Agent 는 재페어링을 시도하다 실패하고, 사용자는 이유를 알 수 없다. (이슈 #26)
+            throw new SlashException(ErrorCode.DEVICE_REVOKED);
         }
 
         Duration skew = Duration.between(request.requestedAt(), SlashTime.now()).abs();
@@ -332,7 +334,7 @@ public class PairingService {
 
         if (!deviceRepository.issueToken(deviceId, Sha256.hex(token), issuedAt.plus(tokenTtl))) {
             // 해제된 기기다. 발급하면 해제가 무력화된다.
-            throw new SlashException(ErrorCode.FORBIDDEN);
+            throw new SlashException(ErrorCode.DEVICE_REVOKED);
         }
 
         long expiresIn = tokenTtl.toSeconds();
