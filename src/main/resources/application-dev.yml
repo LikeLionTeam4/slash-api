@@ -14,6 +14,17 @@ spring:
       host: ${VALKEY_HOST}
       port: ${VALKEY_PORT:6379}
 
+      # 관리형 Valkey 는 AUTH 토큰과 전송 구간 암호화를 함께 켜 두었다.
+      # (slash-infra modules/database/valkey.tf · docs/aws-architecture.md §7-2)
+      #
+      # 둘 중 하나라도 빠지면 접속이 실패하는데, 증상이 인증 오류가 아니라
+      # **1분 타임아웃**으로 나타난다 — 서버가 TLS 핸드셰이크를 기다리는 동안
+      # 평문 요청은 응답을 받지 못하기 때문이다. 그 타임아웃이 리스너 빈 초기화를
+      # 실패시켜 앱 전체가 뜨지 못한다. (slash-infra #23)
+      password: ${VALKEY_AUTH_TOKEN}
+      ssl:
+        enabled: true
+
   security:
     oauth2:
       resourceserver:
