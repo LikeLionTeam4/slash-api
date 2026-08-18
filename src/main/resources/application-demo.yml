@@ -14,6 +14,14 @@ spring:
       host: ${VALKEY_HOST}
       port: ${VALKEY_PORT:6379}
 
+      # dev 와 같은 이유로 켠다. 자세한 설명은 application-dev.yml 을 본다. (slash-infra #23)
+      #
+      # 시연 환경은 아직 values 파일이 없다. 띄울 때 dev 와 같은 배선
+      # (Secrets Manager → ESO → VALKEY_AUTH_TOKEN) 이 필요하다.
+      password: ${VALKEY_AUTH_TOKEN}
+      ssl:
+        enabled: true
+
   security:
     oauth2:
       resourceserver:
