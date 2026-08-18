@@ -166,14 +166,43 @@ public class TaskStateWriter {
     /** 실패로 마감하고 기록한다. */
     @Transactional
     public boolean fail(long taskId, TaskStatus from, ErrorCode errorCode, String message) {
-        Optional<TasksRecord> failed =
-                taskRepository.finishWithError(taskId, from, TaskStatus.FAILED, errorCode);
-        if (failed.isEmpty()) {
-            log.debug("실패 마감을 반영하지 못했다. 이미 {} 가 아니다. taskId={}", from, taskId);
+        return finish(taskId, from, TaskStatus.FAILED, errorCode, message);
+    }
+
+    /**
+     * 기한이 지난 작업을 만료로 마감한다. (만료 배치 · WBS W1-04)
+     *
+     * <p>어느 단계에서든 멈춘 채로 기한을 넘길 수 있어 이전 상태를 받는다. 배치는 조회한
+     * 행의 현재 상태를 그대로 넘긴다.
+     *
+     * <p><b>거짓을 돌려주는 것이 정상 경로에 있다.</b> 조회와 마감 사이에 Agent 의 결과가
+     * 도착했거나 다른 Pod 이 먼저 닿은 경우다. 늦게 온 쪽이 조용히 물러나면 된다 —
+     * 이미 끝난 작업을 만료로 덮어쓰는 것이 훨씬 나쁘다.
+     */
+    @Transactional
+    public boolean expire(long taskId, TaskStatus from, String message) {
+        return finish(taskId, from, TaskStatus.EXPIRED, ErrorCode.TASK_EXPIRED, message);
+    }
+
+    /**
+     * 최종 상태로 마감하고 기록한다.
+     *
+     * <p>실패와 만료는 마감 사유만 다르고 밟는 절차가 같다 — 결과를 지우고, 타임라인에 남기고,
+     * 브라우저에 알린다. 한쪽에만 손대 두 경로가 어긋나지 않도록 여기로 모은다.
+     */
+    private boolean finish(long taskId,
+                           TaskStatus from,
+                           TaskStatus terminal,
+                           ErrorCode errorCode,
+                           String message) {
+        Optional<TasksRecord> finished =
+                taskRepository.finishWithError(taskId, from, terminal, errorCode);
+        if (finished.isEmpty()) {
+            log.debug("{} 마감을 반영하지 못했다. 이미 {} 가 아니다. taskId={}", terminal, from, taskId);
             return false;
         }
-        taskEventRepository.append(taskId, from, TaskStatus.FAILED, errorCode.name(), message);
-        notifyFinished(failed.get(), from, TaskStatus.FAILED);
+        taskEventRepository.append(taskId, from, terminal, errorCode.name(), message);
+        notifyFinished(finished.get(), from, terminal);
         return true;
     }
 }

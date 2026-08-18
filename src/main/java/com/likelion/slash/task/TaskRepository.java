@@ -280,30 +280,31 @@ public class TaskRepository {
     }
 
     /**
-     * 기한이 지난 미완료 작업을 만료로 마감한다. 배치가 주기적으로 호출한다.
+     * 기한이 지나도록 끝나지 않은 작업을 찾는다. 만료 배치가 쓴다.
      *
-     * <p><b>이 메서드는 브라우저에 알리지 않는다.</b> 다른 마감은 모두
-     * {@code TaskStateWriter} 를 거쳐 {@code TASK_STATUS_CHANGED} 와
-     * {@code TASK_RESULT_AVAILABLE} 을 함께 내보내는데, 여기는 한 문장으로 여러 행을 바꾸는
-     * 대량 UPDATE 라 그 경로를 타지 않는다. 이대로 배치를 붙이면 <b>만료된 작업의 화면이
-     * 새로고침 전까지 영영 "진행 중"에 머문다.</b> 사용자 눈에는 멈춘 것으로 보인다.
-     *
-     * <p>배치를 붙이는 쪽이 마감한 작업의 {@code user_id}·{@code public_id} 를 받아
-     * {@code UserEventPublisher} 로 알려야 한다. 지금은 호출자가 없어 드러나지 않는다.
+     * <p><b>왜 마감까지 한 문장으로 하지 않는가</b> — 대량 UPDATE 는 두 가지를 함께 잃는다.
+     * <ol>
+     *   <li><b>이전 상태</b>. {@code RETURNING} 이 돌려주는 것은 이미 바뀐 뒤의 행이라
+     *       {@code task_events} 에 적을 {@code from} 이 남지 않는다. 타임라인이 곧 화면의
+     *       진행 표시라, 마지막 칸이 비면 어디서 멈췄는지 보이지 않는다</li>
+     *   <li><b>알림</b>. 다른 마감은 모두 {@link TaskStateWriter} 를 거쳐
+     *       {@code TASK_STATUS_CHANGED} 와 {@code TASK_RESULT_AVAILABLE} 을 함께 내보낸다.
+     *       대량 UPDATE 는 그 경로를 타지 않아 <b>만료된 작업의 화면이 새로고침 전까지 영영
+     *       "진행 중"에 머문다</b></li>
+     * </ol>
+     * 그래서 대상만 찾아 주고, 마감은 한 건씩 {@link TaskStateWriter#expire} 가 한다.
+     * 여러 Pod 이 같은 작업을 집어도 그쪽 compare-and-set 이 한 번만 통과시킨다.
      *
      * @param createdBefore 이 시각 이전에 만들어진 미완료 작업을 대상으로 한다
-     * @return 마감한 건수
+     * @param limit         한 회차에서 처리할 최대 건수
      */
-    public int expireOverdue(OffsetDateTime createdBefore) {
-        return dsl.update(TASKS)
-                .set(TASKS.STATUS, TaskStatus.EXPIRED.name())
-                .set(TASKS.ERROR_CODE, ErrorCode.TASK_EXPIRED.name())
-                .set(TASKS.RESULT, (JSONB) null)
-                .set(TASKS.COMPLETED_AT, SlashTime.now())
-                .set(TASKS.VERSION, TASKS.VERSION.plus(1))
+    public List<TasksRecord> findOverdue(OffsetDateTime createdBefore, int limit) {
+        return dsl.selectFrom(TASKS)
                 .where(TASKS.STATUS.in(ACTIVE_STATUSES))
                 .and(TASKS.CREATED_AT.lt(createdBefore))
-                .execute();
+                .orderBy(TASKS.CREATED_AT.asc())
+                .limit(limit)
+                .fetch();
     }
 
     private static void requireAllowed(TaskStatus from, TaskStatus to) {

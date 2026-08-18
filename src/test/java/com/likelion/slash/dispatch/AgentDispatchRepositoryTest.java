@@ -5,10 +5,13 @@ import static com.likelion.slash.support.TestFixtures.작업;
 import static com.likelion.slash.support.TestFixtures.준비된_기기;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 import static com.likelion.slash.jooq.Tables.AGENT_DISPATCHES;
 
 import com.likelion.slash.common.SlashTime;
+import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import com.likelion.slash.common.enums.AgentDispatchStatus;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
 import com.likelion.slash.common.enums.TaskStatus;
@@ -93,7 +96,7 @@ class AgentDispatchRepositoryTest {
         var 첫_전달 = agentDispatchRepository.create(첫_작업, deviceId, SlashTime.now().plusMinutes(5));
 
         agentDispatchRepository.markDispatched(첫_전달.getId());
-        agentDispatchRepository.acknowledge(첫_전달.getId());
+        agentDispatchRepository.acknowledge(첫_전달.getId(), SlashTime.now().plusMinutes(5));
         assertThat(agentDispatchRepository.complete(첫_전달.getId())).isTrue();
 
         var 둘째_전달 = agentDispatchRepository.create(둘째_작업, deviceId, SlashTime.now().plusMinutes(5));
@@ -147,6 +150,31 @@ class AgentDispatchRepositoryTest {
     }
 
     @Test
+    @DisplayName("ACK 를 받으면 기한을 실행 기준으로 다시 잡는다")
+    void ACK_가_기한을_다시_잡는다() {
+        long userId = 사용자(dsl);
+        long deviceId = 준비된_기기(dsl, userId);
+        long taskId = 작업(dsl, userId, deviceId, TaskStatus.QUEUED.name());
+        var 전달_기한 = SlashTime.now().plusSeconds(60);
+        var dispatch = agentDispatchRepository.create(taskId, deviceId, 전달_기한);
+
+        // 나노초를 일부러 채운다. timestamptz 는 마이크로초까지만 담고 그 아래를 반올림하는데,
+        // Linux JVM 은 나노초까지 만들어 내고 macOS 는 마이크로초에서 끊는다. 그대로 두면
+        // 저장한 값과 읽은 값이 어긋나는 상황이 CI 에서만 생겨 로컬에서는 보이지 않는다.
+        var 실행_기한 = SlashTime.now().plusMinutes(5).withNano(123_456_789);
+        agentDispatchRepository.acknowledge(dispatch.getId(), 실행_기한);
+
+        // 전달 기한(60초)은 전달이 도달하는 데 주는 시간이다. 그 값으로 실행까지 재면
+        // 오래 걸리는 작업이 실행 도중 만료되고, PC 가 끝내고 보낸 결과가 버려진다.
+        OffsetDateTime 저장된_기한 = agentDispatchRepository
+                .findByPublicId(dispatch.getPublicId()).orElseThrow().getExpiresAt();
+
+        assertThat(저장된_기한)
+                .isAfter(전달_기한)
+                .isCloseTo(실행_기한, within(1, ChronoUnit.MILLIS));
+    }
+
+    @Test
     @DisplayName("배치가 기한이 지난 전달을 마감해 막힌 기기를 푼다")
     void 배치가_만료를_마감한다() {
         long userId = 사용자(dsl);
@@ -154,11 +182,15 @@ class AgentDispatchRepositoryTest {
         long taskId = 작업(dsl, userId, deviceId, TaskStatus.QUEUED.name());
         var dispatch = agentDispatchRepository.create(taskId, deviceId, SlashTime.now().plusMinutes(5));
 
-        agentDispatchRepository.expireOverdue(
-                SlashTime.now().plusMinutes(10), ErrorCode.TASK_EXPIRED.name());
+        var 마감된 = agentDispatchRepository.expireOverdue(
+                SlashTime.now().plusMinutes(10), ErrorCode.TASK_EXPIRED.name(), 1000);
 
-        // 반환값(영향 건수)으로 판정하지 않는다. 표 전체를 쓸어담는 배치라 이 시험 밖에서
-        // 커밋된 미완료 전달 하나에도 흔들린다. 내가 만든 전달을 직접 보면 충분하다.
+        // 건수로 판정하지 않는다. 표 전체를 쓸어담는 배치라 이 시험 밖에서 커밋된 미완료
+        // 전달 하나에도 흔들린다. 내가 만든 전달이 그 안에 있는지만 본다.
+        //
+        // 목록을 돌려받는 것 자체가 계약이다 — 부르는 쪽은 이 값으로 딸린 작업을 마감한다.
+        assertThat(마감된).extracting(record -> record.getTaskId()).contains(taskId);
+
         var 만료된_전달 = agentDispatchRepository.findByPublicId(dispatch.getPublicId()).orElseThrow();
         assertThat(만료된_전달.getStatus()).isEqualTo(AgentDispatchStatus.EXPIRED.name());
         assertThat(만료된_전달.getCompletedAt()).isNotNull();
@@ -231,7 +263,7 @@ class AgentDispatchRepositoryTest {
 
         // markDispatched 를 부르기 전, 즉 PENDING 인 상태에서 ACK 가 온 경우다.
         // 소켓에 쓴 뒤 DISPATCHED 를 기록하므로 Agent 응답이 더 빠를 수 있다.
-        assertThat(agentDispatchRepository.acknowledge(dispatch.getId())).isTrue();
+        assertThat(agentDispatchRepository.acknowledge(dispatch.getId(), SlashTime.now().plusMinutes(5))).isTrue();
 
         var 반영된_전달 = agentDispatchRepository.findByPublicId(dispatch.getPublicId()).orElseThrow();
         assertThat(반영된_전달.getStatus()).isEqualTo(AgentDispatchStatus.ACKNOWLEDGED.name());
@@ -250,7 +282,7 @@ class AgentDispatchRepositoryTest {
         agentDispatchRepository.markDispatched(dispatch.getId());
         agentDispatchRepository.complete(dispatch.getId());
 
-        assertThat(agentDispatchRepository.acknowledge(dispatch.getId())).isFalse();
+        assertThat(agentDispatchRepository.acknowledge(dispatch.getId(), SlashTime.now().plusMinutes(5))).isFalse();
     }
 
     /** 만들어진 지 시간이 지났는데도 아직 PENDING 인 전달. */

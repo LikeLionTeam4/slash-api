@@ -150,8 +150,21 @@ public class AgentDispatchRepository {
      * Agent 의 ACK 가 그 기록보다 먼저 도착할 수 있다. 실제로 로컬 확인에서 매번 그랬다.
      * DISPATCHED 만 받으면 그 ACK 가 조용히 버려져 {@code acknowledged_at} 이 영영 비어 있게 된다.
      * ACK 가 왔다는 것은 프레임이 나갔다는 뜻이므로 {@code dispatched_at} 도 여기서 채운다.
+     *
+     * <p><b>기한을 실행 기준으로 다시 잡는다.</b> {@code slash.dispatch.ttl}(60초)은 <b>전달이
+     * 도달하는 데</b> 주는 시간이다 — 기기가 켜져 있는 것을 확인한 뒤에만 전달을 만들기 때문에
+     * 짧아도 된다. 그 값을 실행에까지 쓰면 60초 넘게 걸리는 작업이 실행 도중에 만료된다.
+     * 만료 스윕이 전달과 작업을 마감해 버리므로, PC 가 일을 마치고 보낸 RESULT 는
+     * {@code isActive} 에서 걸려 버려진다. <b>사용자는 "기한이 지났습니다"를 보는데 PC 는
+     * 작업을 끝낸 상태</b>가 된다.
+     *
+     * <p>Agent 계약과 어긋나지 않는다. TASK 프레임의 {@code expiresAt} 은 "이 시각을 지나면
+     * 실행하지 않는다"는 <b>실행 시작</b> 판정이고({@link AgentTaskFrame}), ACK 는 이미 실행하기로
+     * 했다는 뜻이다. 그 뒤의 기한은 서버가 관리한다.
+     *
+     * @param executionDeadline 실행에 주는 기한. 이 시각까지 RESULT 가 없으면 만료 스윕이 마감한다
      */
-    public boolean acknowledge(long id) {
+    public boolean acknowledge(long id, OffsetDateTime executionDeadline) {
         OffsetDateTime now = SlashTime.now();
 
         return dsl.update(AGENT_DISPATCHES)
@@ -159,6 +172,7 @@ public class AgentDispatchRepository {
                 .set(AGENT_DISPATCHES.ACKNOWLEDGED_AT, now)
                 .set(AGENT_DISPATCHES.DISPATCHED_AT,
                         DSL.coalesce(AGENT_DISPATCHES.DISPATCHED_AT, DSL.val(now)))
+                .set(AGENT_DISPATCHES.EXPIRES_AT, executionDeadline)
                 .where(AGENT_DISPATCHES.ID.eq(id))
                 .and(AGENT_DISPATCHES.STATUS.in(
                         AgentDispatchStatus.PENDING.name(),
@@ -201,15 +215,32 @@ public class AgentDispatchRepository {
      *
      * <p>이 배치가 돌지 않으면 그 Task 와 기기가 영구히 막힌다.
      *
-     * @return 마감한 건수
+     * <p><b>마감한 행을 돌려주는 이유</b> — 전달을 푸는 것만으로는 끝나지 않는다. 그 전달에
+     * 매달린 Task 도 함께 마감하고 브라우저에 알려야 하는데, 부르는 쪽이 대상을 알 방법이
+     * 이 반환값밖에 없다. 건수만 돌려주면 어느 작업이 풀렸는지 다시 찾아야 하고, 그 사이에
+     * 다른 Pod 이 같은 행을 또 집을 수 있다.
+     *
+     * <p><b>여러 Pod 이 동시에 돌아도 한 곳만 받는다.</b> 만료 대상을 고르는 조건을 서브질의
+     * 안에만 두면 두 Pod 이 같은 행을 함께 받아 알림이 두 번 나간다. Postgres 가 행 잠금을 푼
+     * 뒤 다시 보는 것은 바깥 {@code WHERE} 뿐이라, 활성 조건을 바깥에도 남겨 둔다.
+     *
+     * @param limit 한 회차에서 마감할 최대 건수. 밀린 양이 많아도 회차를 길게 잡지 않는다.
+     * @return 마감한 전달. 각 행의 {@code task_id}·{@code device_id} 로 뒷정리를 이어 간다
      */
-    public int expireOverdue(OffsetDateTime now, String reasonCode) {
+    public List<AgentDispatchesRecord> expireOverdue(OffsetDateTime now, String reasonCode, int limit) {
         return dsl.update(AGENT_DISPATCHES)
                 .set(AGENT_DISPATCHES.STATUS, AgentDispatchStatus.EXPIRED.name())
                 .set(AGENT_DISPATCHES.REASON_CODE, reasonCode)
                 .set(AGENT_DISPATCHES.COMPLETED_AT, SlashTime.now())
                 .where(AGENT_DISPATCHES.STATUS.in(ACTIVE_STATUSES))
-                .and(AGENT_DISPATCHES.EXPIRES_AT.le(now))
-                .execute();
+                .and(AGENT_DISPATCHES.ID.in(
+                        DSL.select(AGENT_DISPATCHES.ID)
+                                .from(AGENT_DISPATCHES)
+                                .where(AGENT_DISPATCHES.STATUS.in(ACTIVE_STATUSES))
+                                .and(AGENT_DISPATCHES.EXPIRES_AT.le(now))
+                                .orderBy(AGENT_DISPATCHES.EXPIRES_AT.asc())
+                                .limit(limit)))
+                .returning()
+                .fetch();
     }
 }

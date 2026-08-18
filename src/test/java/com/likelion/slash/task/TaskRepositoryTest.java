@@ -251,18 +251,29 @@ class TaskRepositoryTest {
     }
 
     @Test
-    @DisplayName("배치가 기한이 지난 미완료 작업을 만료로 마감한다")
-    void 만료_마감_배치() {
+    @DisplayName("배치가 기한이 지난 미완료 작업을 찾는다")
+    void 만료_대상을_찾는다() {
         long userId = 사용자(dsl);
         long 미완료 = 작업(dsl, userId, null, TaskStatus.QUEUED.name());
         long 이미_성공 = 작업(dsl, userId, null, TaskStatus.RUNNING.name());
         taskRepository.succeed(이미_성공, TaskStatus.RUNNING, JSONB.valueOf("{}"));
 
-        int 마감한_건수 = taskRepository.expireOverdue(SlashTime.now().plusMinutes(1));
+        // 마감까지 한 문장으로 하지 않는다. 대량 UPDATE 는 이전 상태를 잃어 타임라인에 적을
+        // from 이 없고, TaskStateWriter 를 거치지 않아 브라우저 알림도 나가지 않는다.
+        var 대상 = taskRepository.findOverdue(SlashTime.now().plusMinutes(1), 1000);
 
-        assertThat(마감한_건수).isEqualTo(1);
-        var 만료된_작업 = taskRepository.findById(미완료).orElseThrow();
-        assertThat(만료된_작업.getStatus()).isEqualTo(TaskStatus.EXPIRED.name());
-        assertThat(만료된_작업.getErrorCode()).isEqualTo(ErrorCode.TASK_EXPIRED.name());
+        assertThat(대상).extracting(record -> record.getId())
+                .contains(미완료)
+                .doesNotContain(이미_성공);
+    }
+
+    @Test
+    @DisplayName("아직 기한이 남은 작업은 만료 대상이 아니다")
+    void 기한이_남으면_대상이_아니다() {
+        long 방금_접수 = 작업(dsl, 사용자(dsl), null, TaskStatus.QUEUED.name());
+
+        var 대상 = taskRepository.findOverdue(SlashTime.now().minusMinutes(1), 1000);
+
+        assertThat(대상).extracting(record -> record.getId()).doesNotContain(방금_접수);
     }
 }

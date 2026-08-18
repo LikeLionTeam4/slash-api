@@ -28,7 +28,9 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.OffsetDateTime;
+import org.springframework.beans.factory.annotation.Value;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -135,6 +137,14 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final TaskRepository taskRepository;
     private final TaskStateWriter stateWriter;
 
+    /**
+     * ACK 를 받은 뒤 실행에 주는 기한.
+     *
+     * <p>전달 기한({@code slash.dispatch.ttl})과 다른 값이다. 전달은 켜져 있는 기기에만 만들어
+     * 60초면 충분하지만, 실행은 작업에 따라 그보다 오래 걸린다.
+     */
+    private final Duration executionTtl;
+
     public AgentWebSocketHandler(ObjectMapper objectMapper,
                                  WsSessionRegistry registry,
                                  AgentSignatureVerifier signatureVerifier,
@@ -144,7 +154,8 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                                  AgentDispatchRepository agentDispatchRepository,
                                  TaskService taskService,
                                  TaskRepository taskRepository,
-                                 TaskStateWriter stateWriter) {
+                                 TaskStateWriter stateWriter,
+                                 @Value("${slash.dispatch.execution-ttl}") Duration executionTtl) {
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.signatureVerifier = signatureVerifier;
@@ -155,6 +166,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         this.taskService = taskService;
         this.taskRepository = taskRepository;
         this.stateWriter = stateWriter;
+        this.executionTtl = executionTtl;
     }
 
     // ------------------------------------------------------------------
@@ -474,7 +486,9 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         long taskId = dispatch.get().getTaskId();
 
         if (frame.path("accepted").asBoolean(false)) {
-            agentDispatchRepository.acknowledge(id);
+            // 전달 기한(60초)은 여기서 끝난다. 이제부터는 실행 기한이다 —
+            // 그대로 두면 오래 걸리는 작업이 실행 도중에 만료 스윕에 걸린다.
+            agentDispatchRepository.acknowledge(id, SlashTime.now().plus(executionTtl));
             stateWriter.move(taskId, TaskStatus.QUEUED, TaskStatus.RUNNING, null, "PC 가 작업을 시작했습니다.");
             return;
         }
