@@ -28,6 +28,14 @@ spring:
     # 전체 삭제를 원천 차단한다. 어떤 프로필에서도 활성화하지 않는다.
     clean-disabled: true
 
+  task:
+    scheduling:
+      # 주기 작업은 기본값이 스레드 1개라 모두 한 줄로 선다. 붙지 못한 Valkey 에 구독을
+      # 시도하는 동안(연결 대기까지 수 초) 스윕들이 그만큼 밀리므로 여유를 둔다.
+      # 지금 도는 주기 작업은 스윕 4개와 구독 재시도 1개다.
+      pool:
+        size: 3
+
   jooq:
     sql-dialect: postgres
 
@@ -151,6 +159,15 @@ slash:
 
     # 접속표를 받은 브라우저에게 알려줄 WSS 주소. 환경마다 다르다.
     ws-url: ${USER_WS_URL:ws://localhost:8080/ws/user}
+
+    # Pod 간 이벤트 구독을 다시 시도하는 간격.
+    #
+    # Valkey 에 닿지 못하면 구독은 걸리지 않지만 앱은 뜬다. 그동안 화면 반영이 늦어질 뿐
+    # API·WSS·스윕은 정상이므로(이슈 #36), 붙을 때까지 이 간격으로 다시 시도한다.
+    #
+    # @Scheduled 의 문자열 값은 5s 같은 표기를 해석하지 못해 여기만 밀리초로 적는다.
+    subscribe-retry:
+      interval-ms: 5000
 
   dispatch:
     # 전달 기한. Agent 는 이 시각이 지난 TASK 를 실행하지 않는다. (메시지 스펙 §5)
