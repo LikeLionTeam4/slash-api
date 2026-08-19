@@ -13,9 +13,12 @@ import com.likelion.slash.common.error.SlashException;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.device.DeviceSearchFolderRepository;
 import com.likelion.slash.dispatch.TaskDispatcher;
+import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import com.likelion.slash.jooq.tables.records.IdempotencyRecordsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.llm.LlmSummaryEnqueuer;
+import com.likelion.slash.llm.LlmSummaryRunner;
 import com.likelion.slash.nlu.NluClient;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
 import com.likelion.slash.task.dto.CreateRequestRequest;
@@ -33,6 +36,7 @@ import java.util.UUID;
 import org.jooq.JSONB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -65,6 +69,9 @@ public class TaskService {
     /** FILE_SEARCH 의 서버가 채우는 입력값. Agent 가 READY 로 보고한 폴더 중 하나를 넣는다. */
     private static final String PARAMETER_SEARCH_FOLDER_ID = "searchFolderId";
 
+    /** TEXT_SUMMARY 의 원문. NLU 가 채운다. */
+    private static final String PARAMETER_TEXT = "text";
+
     /** WEATHER_LOOKUP 의 지명. NLU 가 채운다. */
     private static final String PARAMETER_LOCATION = "location";
 
@@ -83,6 +90,16 @@ public class TaskService {
     private final TaskDispatcher taskDispatcher;
     private final ObjectMapper objectMapper;
     private final WeatherClient weatherClient;
+    private final LlmSummaryEnqueuer llmSummaryEnqueuer;
+    private final LlmSummaryRunner llmSummaryRunner;
+
+    /**
+     * 요약 작업의 기한. 이 시각까지 끝나지 않으면 스윕이 마감한다.
+     *
+     * <p>전달 기한과 따로 두는 이유 — 전달은 켜져 있는 PC 에만 만들어 60초면 충분하지만,
+     * 요약은 모델이 밀려 있으면 그보다 오래 걸린다.
+     */
+    private final Duration summaryDeadline;
 
     public TaskService(TaskRepository taskRepository,
                        TaskStateWriter stateWriter,
@@ -92,7 +109,10 @@ public class TaskService {
                        NluClient nluClient,
                        TaskDispatcher taskDispatcher,
                        ObjectMapper objectMapper,
-                       WeatherClient weatherClient) {
+                       WeatherClient weatherClient,
+                       LlmSummaryEnqueuer llmSummaryEnqueuer,
+                       LlmSummaryRunner llmSummaryRunner,
+                       @Value("${slash.llm.job-deadline}") Duration summaryDeadline) {
         this.taskRepository = taskRepository;
         this.stateWriter = stateWriter;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
@@ -102,6 +122,9 @@ public class TaskService {
         this.taskDispatcher = taskDispatcher;
         this.objectMapper = objectMapper;
         this.weatherClient = weatherClient;
+        this.llmSummaryEnqueuer = llmSummaryEnqueuer;
+        this.llmSummaryRunner = llmSummaryRunner;
+        this.summaryDeadline = summaryDeadline;
     }
 
     // ------------------------------------------------------------------
@@ -281,9 +304,73 @@ public class TaskService {
         return switch (taskType.processingRoute()) {
             case LOCAL_AGENT -> routeToDevice(user, task, taskType, nlu, selectedDeviceId);
             case BACKEND_SERVICE -> routeToWeather(task, taskType, nlu);
-            case LLM_SERVICE -> notReadyYet(task, taskType, ErrorCode.LLM_NOT_READY,
-                    "요약은 아직 연결되어 있지 않습니다.");
+            case LLM_SERVICE -> routeToLlm(task, taskType, nlu);
         };
+    }
+
+    /**
+     * 날씨를 조회한다. (Open-Meteo)
+     *
+     * <p><b>여기서 곧바로 부른다.</b> 요약과 달리 원장을 두지 않는다 — 두 번의 조회가 보통
+     * 1초 안에 끝나고, 실패해도 사용자가 다시 누르면 그만이라 남겨서 이어받을 것이 없다.
+     * ({@code async_jobs} 의 {@code ck_async_jobs_job_type} 도 LLM 작업만 허용한다)
+     *
+     * <p><b>기기를 고르지 않는다.</b> 서버가 하는 일이라 PC 가 없어도 된다.
+     *
+     * <p>지역을 못 찾은 것과 서비스가 멈춘 것을 나눈다. 앞은 사용자가 다시 말하면 되지만
+     * 뒤는 기다리는 수밖에 없어서, 같은 말로 안내하면 사용자가 할 수 있는 일을 가린다.
+     */
+    private TaskStatus routeToWeather(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
+        Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
+        String location = String.valueOf(parameters.get(PARAMETER_LOCATION));
+
+        boolean applied = stateWriter.applyAnalysisAndMove(
+                task.getId(),
+                taskType,
+                ProcessingRoute.BACKEND_SERVICE,
+                null,
+                toJsonb(parameters),
+                summarize(task.getInputText()),
+                TaskStatus.QUEUED,
+                null,
+                "날씨를 조회합니다.");
+
+        if (!applied) {
+            return currentStatusOf(task.getId());
+        }
+
+        stateWriter.move(task.getId(), TaskStatus.QUEUED, TaskStatus.RUNNING, null, "날씨를 조회하고 있습니다.");
+
+        WeatherOutcome outcome = weatherClient.lookup(location);
+        if (outcome instanceof WeatherOutcome.Failure failure) {
+            stateWriter.fail(task.getId(), TaskStatus.RUNNING, failure.errorCode(), failure.message());
+            return TaskStatus.FAILED;
+        }
+
+        WeatherOutcome.Success success = (WeatherOutcome.Success) outcome;
+        stateWriter.succeed(task.getId(), toJsonb(weatherResult(success)), "날씨를 알려 드립니다.");
+        return TaskStatus.SUCCEEDED;
+    }
+
+    /**
+     * 화면이 그대로 읽을 수 있는 모양으로 옮긴다.
+     *
+     * <p>찾아낸 지명을 함께 싣는 이유 — 사용자가 말한 "수원" 과 실제로 조회한 "수원시(경기도)"
+     * 가 다를 수 있다. 어디의 날씨인지 보여 줘야 엉뚱한 곳이면 사용자가 알아챈다.
+     */
+    private Map<String, Object> weatherResult(WeatherOutcome.Success success) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("location", success.place().name());
+        result.put("region", success.place().admin1());
+        result.put("country", success.place().country());
+        result.put("temperature", success.current().temperature());
+        result.put("apparentTemperature", success.current().apparentTemperature());
+        result.put("humidity", success.current().humidity());
+        result.put("precipitation", success.current().precipitation());
+        result.put("windSpeed", success.current().windSpeed());
+        result.put("description", WeatherCode.describe(success.current().weatherCode()));
+        result.put("observedAt", success.current().time());
+        return result;
     }
 
     /**
@@ -373,82 +460,46 @@ public class TaskService {
     }
 
     /**
-     * 날씨를 조회한다. (Open-Meteo)
+     * 요약을 맡긴다. (slash-llm {@code docs/BACKEND_CONTRACT.md})
      *
-     * <p><b>여기서 곧바로 부른다.</b> 요약과 달리 원장을 두지 않는다 — 두 번의 조회가 보통
-     * 1초 안에 끝나고, 실패해도 사용자가 다시 누르면 그만이라 남겨서 이어받을 것이 없다.
-     * ({@code async_jobs} 의 {@code ck_async_jobs_job_type} 도 LLM 작업만 허용한다)
+     * <p><b>여기서 모델을 기다리지 않는다.</b> {@code QUEUED} 까지만 옮기고 원장을 남긴 뒤
+     * 곧바로 응답한다. 실제 호출은 {@link LlmSummaryRunner} 가 뒤에서 하고, 화면은 WSS·폴링으로
+     * 따라온다. ({@code docs/frontend-api-contract.md} §7)
      *
-     * <p><b>기기를 고르지 않는다.</b> 서버가 하는 일이라 PC 가 없어도 된다.
+     * <p><b>기기를 고르지 않는다.</b> 요약은 서버 쪽 모델이 하는 일이라 PC 가 없어도 된다.
+     * ({@code TaskType#requiresDevice} 가 거짓이고 {@code ck_tasks_local_agent_requires_device} 도
+     * 로컬 실행 작업에만 기기를 요구한다)
      *
-     * <p>지역을 못 찾은 것과 서비스가 멈춘 것을 나눈다. 앞은 사용자가 다시 말하면 되지만
-     * 뒤는 기다리는 수밖에 없어서, 같은 말로 안내하면 사용자가 할 수 있는 일을 가린다.
+     * <p>원장을 먼저 남기는 이유는 전달과 같다 — Pod 이 호출 도중에 죽어도 작업이 사라지지
+     * 않고 {@link com.likelion.slash.llm.LlmJobSweeper} 가 이어받는다.
+     *
+     * <p><b>Task 전이와 원장 생성은 한 트랜잭션이어야 한다.</b> 그 묶음은
+     * {@link LlmSummaryEnqueuer#enqueue} 가 맡는다 — 여기서 나눠 부르면 그 사이의 실패가
+     * 원장 없는 {@code QUEUED} Task 를 남기고, 스윕은 원장을 보고 도는 것이라 찾지 못한다.
      */
-    private TaskStatus routeToWeather(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
+    private TaskStatus routeToLlm(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
         Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
-        String location = String.valueOf(parameters.get(PARAMETER_LOCATION));
+        JSONB input = toJsonb(parameters);
 
-        boolean applied = stateWriter.applyAnalysisAndMove(
-                task.getId(),
-                taskType,
-                ProcessingRoute.BACKEND_SERVICE,
-                null,
-                toJsonb(parameters),
-                summarize(task.getInputText()),
-                TaskStatus.QUEUED,
-                null,
-                "날씨를 조회합니다.");
+        Optional<AsyncJobsRecord> job = llmSummaryEnqueuer.enqueue(
+                task.getId(), taskType, input, summarize(task.getInputText()),
+                SlashTime.now().plus(summaryDeadline));
 
-        if (!applied) {
+        if (job.isEmpty()) {
             return currentStatusOf(task.getId());
         }
 
-        stateWriter.move(task.getId(), TaskStatus.QUEUED, TaskStatus.RUNNING, null, "날씨를 조회하고 있습니다.");
+        // enqueue 가 돌아왔다는 것은 커밋됐다는 뜻이다. 이제 다른 Pod 과 스윕도 이 원장을 본다.
+        llmSummaryRunner.runAsync(
+                job.get().getId(),
+                task.getId(),
+                task.getCorrelationId(),
+                task.getPublicId(),
+                String.valueOf(parameters.get(PARAMETER_TEXT)));
 
-        WeatherOutcome outcome = weatherClient.lookup(location);
-        if (outcome instanceof WeatherOutcome.Failure failure) {
-            stateWriter.fail(task.getId(), TaskStatus.RUNNING, failure.errorCode(), failure.message());
-            return TaskStatus.FAILED;
-        }
-
-        WeatherOutcome.Success success = (WeatherOutcome.Success) outcome;
-        stateWriter.succeed(task.getId(), toJsonb(weatherResult(success)), "날씨를 알려 드립니다.");
-        return TaskStatus.SUCCEEDED;
+        return TaskStatus.QUEUED;
     }
 
-    /**
-     * 화면이 그대로 읽을 수 있는 모양으로 옮긴다.
-     *
-     * <p>찾아낸 지명을 함께 싣는 이유 — 사용자가 말한 "수원" 과 실제로 조회한 "수원시(경기도)"
-     * 가 다를 수 있다. 어디의 날씨인지 보여 줘야 엉뚱한 곳이면 사용자가 알아챈다.
-     */
-    private Map<String, Object> weatherResult(WeatherOutcome.Success success) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("location", success.place().name());
-        result.put("region", success.place().admin1());
-        result.put("country", success.place().country());
-        result.put("temperature", success.current().temperature());
-        result.put("apparentTemperature", success.current().apparentTemperature());
-        result.put("humidity", success.current().humidity());
-        result.put("precipitation", success.current().precipitation());
-        result.put("windSpeed", success.current().windSpeed());
-        result.put("description", WeatherCode.describe(success.current().weatherCode()));
-        result.put("observedAt", success.current().time());
-        return result;
-    }
-
-    /**
-     * 아직 붙이지 않은 처리 경로.
-     *
-     * <p>있는 척하지 않고 실패로 마감한다. 화면에는 "아직 연결되어 있지 않다"가 그대로 보인다.
-     * {@code BACKEND_SERVICE}(날씨)와 {@code LLM_SERVICE}(요약)는 종단 경로를 먼저 뚫은 뒤에
-     * 붙인다.
-     */
-    private TaskStatus notReadyYet(TasksRecord task, TaskType taskType, ErrorCode errorCode, String message) {
-        log.info("아직 연결되지 않은 처리 경로 taskId={} taskType={}", task.getPublicId(), taskType);
-        stateWriter.fail(task.getId(), TaskStatus.ANALYZING, errorCode, message);
-        return TaskStatus.FAILED;
-    }
 
     /**
      * 실행할 기기를 고른다.

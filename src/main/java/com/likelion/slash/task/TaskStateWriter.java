@@ -150,15 +150,16 @@ public class TaskStateWriter {
     }
 
     /**
-     * Agent 가 보고한 실패를 반영해 마감한다.
+     * 우리 대신 일하는 쪽에서 온 실패를 반영해 마감한다.
      *
-     * <p>ACK 거부는 {@code QUEUED} 에서, RESULT 실패는 {@code RUNNING} 에서 온다. 부르는 쪽이
-     * 둘 중 어디인지 알 필요가 없게 여기서 모두 시도한다.
+     * <p>Agent 는 ACK 거부를 {@code QUEUED} 에서, RESULT 실패를 {@code RUNNING} 에서 보낸다.
+     * 요약도 마찬가지로 시작 전({@code QUEUED})과 실행 중({@code RUNNING}) 어느 쪽에서든
+     * 실패할 수 있다. 부르는 쪽이 둘 중 어디인지 알 필요가 없게 여기서 모두 시도한다.
      *
      * @return 반영 여부. 거짓이면 이미 마감된 작업이다.
      */
     @Transactional
-    public boolean failFromAgent(long taskId, ErrorCode errorCode, String message) {
+    public boolean failFromWorker(long taskId, ErrorCode errorCode, String message) {
         return fail(taskId, TaskStatus.RUNNING, errorCode, message)
                 || fail(taskId, TaskStatus.QUEUED, errorCode, message);
     }

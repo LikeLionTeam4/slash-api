@@ -1,6 +1,7 @@
 package com.likelion.slash.task;
 
 import static com.likelion.slash.jooq.Tables.AGENT_DISPATCHES;
+import static com.likelion.slash.jooq.Tables.ASYNC_JOBS;
 import static com.likelion.slash.jooq.Tables.DEVICES;
 import static com.likelion.slash.jooq.Tables.TASKS;
 import static com.likelion.slash.jooq.Tables.TASK_EVENTS;
@@ -10,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -19,6 +21,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.auth.AuthenticatedUser;
 import com.likelion.slash.common.SlashTime;
+import com.likelion.slash.common.enums.AsyncJobStatus;
+import com.likelion.slash.common.enums.AsyncJobType;
 import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
@@ -27,7 +31,9 @@ import com.likelion.slash.common.error.SlashException;
 import com.likelion.slash.device.DeviceSearchFolderRepository;
 import com.likelion.slash.device.SearchFolder;
 import com.likelion.slash.dispatch.TaskDispatcher;
+import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.llm.LlmSummaryRunner;
 import com.likelion.slash.nlu.NluClient;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
 import com.likelion.slash.nlu.dto.NluDecision;
@@ -84,6 +90,12 @@ class TaskServiceTest {
     @MockitoBean
     private TaskDispatcher taskDispatcher;
 
+    /**
+     * 실행만 막는다. 접수({@link com.likelion.slash.llm.LlmSummaryEnqueuer})는 실제로 돌려서
+     * Task 전이와 원장이 한 트랜잭션에서 남는 것까지 본다. 모델 호출은 LlmSummaryRunnerTest 가 본다.
+     */
+    @MockitoBean
+    private LlmSummaryRunner llmSummaryRunner;
     /** 밖으로 나가는 호출이다. 계약은 WeatherClientTest 가 본다. */
     @MockitoBean
     private WeatherClient weatherClient;
@@ -483,17 +495,6 @@ class TaskServiceTest {
         assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.NLU_UNAVAILABLE.name());
     }
 
-    @Test
-    @DisplayName("아직 붙이지 않은 처리 경로는 있는 척하지 않고 실패로 마감한다")
-    void 아직_없는_경로는_실패로_마감한다() {
-        NLU가(작업분석("TEXT_SUMMARY", Map.of("text", "요약할 긴 글")));
-
-        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/summary 긴 글", null), null);
-
-        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
-        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.LLM_NOT_READY.name());
-    }
-
     // ------------------------------------------------------------------
     // 날씨 경로
     // ------------------------------------------------------------------
@@ -602,6 +603,66 @@ class TaskServiceTest {
     // ------------------------------------------------------------------
     // 보조
     // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // 요약 경로
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("요약은 QUEUED 로 답하고 실행은 뒤로 넘긴다")
+    void 요약을_맡긴다() {
+        NLU가(작업분석("TEXT_SUMMARY", Map.of("text", "요약할 긴 글")));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/summary 요약할 긴 글", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+
+        TasksRecord 작업 = 작업조회(응답.taskId());
+        assertThat(작업.getTaskType()).isEqualTo("TEXT_SUMMARY");
+        assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.LLM_SERVICE.name());
+
+        // 요약은 서버 쪽 모델이 하는 일이라 PC 를 붙들지 않는다.
+        assertThat(작업.getDeviceId()).isNull();
+        verify(taskDispatcher, never()).dispatch(any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("요약을 맡기면 원장을 남기고 실행을 시작한다")
+    void 요약_원장을_남긴다() {
+        NLU가(작업분석("TEXT_SUMMARY", Map.of("text", "요약할 긴 글")));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/summary 요약할 긴 글", null), null);
+
+        long taskId = 작업조회(응답.taskId()).getId();
+        AsyncJobsRecord 원장 = dsl.selectFrom(ASYNC_JOBS)
+                .where(ASYNC_JOBS.TASK_ID.eq(taskId))
+                .fetchOne();
+
+        assertThat(원장).isNotNull();
+        assertThat(원장.getJobType()).isEqualTo(AsyncJobType.TEXT_SUMMARY.name());
+
+        // PENDING 이 아니라 QUEUED 다 — 원장만 남기고 아무에게도 맡기지 않으면 아무도 집지 않는다.
+        assertThat(원장.getStatus()).isEqualTo(AsyncJobStatus.QUEUED.name());
+        assertThat(원장.getDeadlineAt()).isAfter(SlashTime.now());
+
+        verify(llmSummaryRunner).runAsync(
+                eq(원장.getId()), eq(taskId), any(), eq(응답.taskId()), eq("요약할 긴 글"));
+    }
+
+    @Test
+    @DisplayName("PC 가 없어도 요약은 받는다")
+    void PC_없이도_요약한다() {
+        // 기기를 하나도 만들지 않는다.
+        NLU가(작업분석("TEXT_SUMMARY", Map.of("text", "요약할 긴 글")));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/summary 요약할 긴 글", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+        assertThat(마지막_안내(응답.taskId())).isEqualTo("요약을 맡겼습니다.");
+    }
 
     private void 날씨가(WeatherOutcome 결과) {
         NLU가(작업분석("WEATHER_LOOKUP", Map.of("location", "수원")));

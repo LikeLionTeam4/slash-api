@@ -517,7 +517,7 @@ class AgentWebSocketHandlerTest {
                 "\"error\":{\"code\":\"SEARCH_FOLDER_NOT_FOUND\",\"message\":\"없음\",\"retryable\":false}"));
 
         verify(agentDispatchRepository).fail(7L, "SEARCH_FOLDER_NOT_FOUND");
-        verify(stateWriter).failFromAgent(작업_PK, ErrorCode.SEARCH_FOLDER_NOT_FOUND, "없음");
+        verify(stateWriter).failFromWorker(작업_PK, ErrorCode.SEARCH_FOLDER_NOT_FOUND, "없음");
         verify(stateWriter, never()).succeed(anyLong(), any(), any());
     }
 
@@ -534,7 +534,7 @@ class AgentWebSocketHandlerTest {
                 "\"result\":null",
                 "\"error\":{\"code\":\"AUTH_REQUIRED\",\"message\":\"x\",\"retryable\":false}"));
 
-        verify(stateWriter).failFromAgent(eq(작업_PK), eq(ErrorCode.AGENT_TASK_FAILED), any());
+        verify(stateWriter).failFromWorker(eq(작업_PK), eq(ErrorCode.AGENT_TASK_FAILED), any());
         verify(agentDispatchRepository).fail(7L, "AGENT_TASK_FAILED");
     }
 
@@ -580,7 +580,7 @@ class AgentWebSocketHandlerTest {
                 "\"result\":{\"big\":\"…\"}",
                 "\"error\":null"));
 
-        verify(stateWriter).failFromAgent(eq(작업_PK), eq(ErrorCode.AGENT_TASK_FAILED), any());
+        verify(stateWriter).failFromWorker(eq(작업_PK), eq(ErrorCode.AGENT_TASK_FAILED), any());
         assertThat(session.isOpen()).isTrue();
 
         // 마감은 했지만 결과를 담지는 못했다.
@@ -629,7 +629,7 @@ class AgentWebSocketHandlerTest {
 
         // 원장만 마감하면 작업은 QUEUED 로 굳어 끝나지 않는 진행 표시로 남는다.
         verify(agentDispatchRepository).fail(7L, "TASK_TYPE_NOT_SUPPORTED");
-        verify(stateWriter).failFromAgent(eq(작업_PK), eq(ErrorCode.TASK_TYPE_NOT_SUPPORTED), any());
+        verify(stateWriter).failFromWorker(eq(작업_PK), eq(ErrorCode.TASK_TYPE_NOT_SUPPORTED), any());
         verify(agentDispatchRepository, never()).acknowledge(anyLong(), any());
     }
 
@@ -644,7 +644,7 @@ class AgentWebSocketHandlerTest {
                 "\"accepted\":false",
                 "\"reasonCode\":null"));
 
-        verify(stateWriter).failFromAgent(eq(작업_PK), eq(ErrorCode.AGENT_REJECTED), any());
+        verify(stateWriter).failFromWorker(eq(작업_PK), eq(ErrorCode.AGENT_REJECTED), any());
     }
 
     @Test
