@@ -369,6 +369,7 @@ GET  /api/v1/tasks/{taskId}              → 200
 | `POLICY_DENIED` | 403 | 허용되지 않은 경로 또는 작업 |
 | `AGENT_REJECTED` | 422 | PC 가 작업을 받지 않음. 사유를 알 수 없을 때 옵니다 |
 | `AGENT_TASK_FAILED` | 422 | PC 에서 실행이 끝나지 못함. 사유를 알 수 없을 때 옵니다 |
+| `DEVICE_REVOKED` | 403 | **등록이 해제된 PC 입니다.** `FORBIDDEN` 과 달리 다시 시도할 여지가 없으니 재등록을 안내해 주세요 |
 
 > **`AGENT_REJECTED`·`AGENT_TASK_FAILED` 는 마지막 수단입니다.** PC 가 사유를 함께 보내면
 > 위 표의 구체적인 코드(`TASK_TYPE_NOT_SUPPORTED`·`POLICY_DENIED` 등)로 옵니다. 사유가 없거나
@@ -382,6 +383,7 @@ GET  /api/v1/tasks/{taskId}              → 200
 | `NLU_UNAVAILABLE` | 503 | 잠시 후 다시 안내. **자동 재시도 금지** |
 | `LLM_NOT_READY` | 503 | AI 모델 준비 중 안내 |
 | `UPSTREAM_UNAVAILABLE` | 503 | 외부 서비스 문제 안내 |
+| `LOCATION_NOT_FOUND` | 422 | **날씨를 조회할 지역을 찾지 못함.** 503 과 달리 사용자가 다시 말하면 되는 상황이라 "시·군 이름으로 다시 말씀해 주세요" 로 안내해 주세요 |
 | `UNSUPPORTED_SCHEMA_VERSION` | 422 | 클라이언트 갱신 필요 |
 | `INTERNAL_ERROR` | 500 | 일반 오류 안내 + `requestId` 노출 |
 
