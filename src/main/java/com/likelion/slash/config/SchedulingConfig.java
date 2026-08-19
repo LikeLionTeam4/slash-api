@@ -6,7 +6,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 /**
  * 주기 작업 활성화.
  *
- * <p>지금 도는 것은 여섯 가지다.
+ * <p>지금 도는 것은 일곱 가지다.
  * <ul>
  *   <li>{@link com.likelion.slash.dispatch.PendingDispatchSweeper} — 미전달 작업 재발행</li>
  *   <li>{@link com.likelion.slash.dispatch.DispatchExpirySweeper} — 기한이 지난 전달 마감</li>
@@ -14,6 +14,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  *   <li>{@link com.likelion.slash.device.DeviceOfflineSweeper} — Heartbeat 가 끊긴 기기 내리기</li>
  *   <li>{@link com.likelion.slash.ws.WsSubscriptionStarter} — Pod 간 이벤트 구독 재시도</li>
  *   <li>{@link com.likelion.slash.llm.LlmJobSweeper} — 시작되지 못한 요약 재실행·기한 마감</li>
+ *   <li>{@link com.likelion.slash.llm.LlmReadiness} — 요약 모델이 작업을 받을 수 있는지 확인</li>
  * </ul>
  *
  * <p><b>모든 Pod 이 동시에 돈다.</b> 주기 작업은 Pod 마다 따로 실행되므로,
