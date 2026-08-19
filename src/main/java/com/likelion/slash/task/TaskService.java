@@ -17,6 +17,7 @@ import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import com.likelion.slash.jooq.tables.records.IdempotencyRecordsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.llm.LlmReadiness;
 import com.likelion.slash.llm.LlmSummaryEnqueuer;
 import com.likelion.slash.llm.LlmSummaryRunner;
 import com.likelion.slash.nlu.NluClient;
@@ -90,6 +91,7 @@ public class TaskService {
     private final TaskDispatcher taskDispatcher;
     private final ObjectMapper objectMapper;
     private final WeatherClient weatherClient;
+    private final LlmReadiness llmReadiness;
     private final LlmSummaryEnqueuer llmSummaryEnqueuer;
     private final LlmSummaryRunner llmSummaryRunner;
 
@@ -110,6 +112,7 @@ public class TaskService {
                        TaskDispatcher taskDispatcher,
                        ObjectMapper objectMapper,
                        WeatherClient weatherClient,
+                       LlmReadiness llmReadiness,
                        LlmSummaryEnqueuer llmSummaryEnqueuer,
                        LlmSummaryRunner llmSummaryRunner,
                        @Value("${slash.llm.job-deadline}") Duration summaryDeadline) {
@@ -122,6 +125,7 @@ public class TaskService {
         this.taskDispatcher = taskDispatcher;
         this.objectMapper = objectMapper;
         this.weatherClient = weatherClient;
+        this.llmReadiness = llmReadiness;
         this.llmSummaryEnqueuer = llmSummaryEnqueuer;
         this.llmSummaryRunner = llmSummaryRunner;
         this.summaryDeadline = summaryDeadline;
@@ -478,6 +482,16 @@ public class TaskService {
      * 원장 없는 {@code QUEUED} Task 를 남기고, 스윕은 원장을 보고 도는 것이라 찾지 못한다.
      */
     private TaskStatus routeToLlm(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
+        // 받을 수 없는 상태라면 원장을 만들지 않고 여기서 답한다. 만들어 두면 호출했다가
+        // 실패로 마감하는 일을 반복하고, 사용자는 같은 말을 한참 뒤에 듣는다.
+        if (!llmReadiness.canAccept()) {
+            log.info("요약 모델이 작업을 받을 수 없어 접수하지 않는다 taskId={} reason={}",
+                    task.getPublicId(), llmReadiness.reason().orElse("UNKNOWN"));
+            stateWriter.fail(task.getId(), TaskStatus.ANALYZING, ErrorCode.LLM_NOT_READY,
+                    "요약 모델이 아직 준비되지 않았습니다. 잠시 뒤 다시 시도해 주세요.");
+            return TaskStatus.FAILED;
+        }
+
         Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
         JSONB input = toJsonb(parameters);
 

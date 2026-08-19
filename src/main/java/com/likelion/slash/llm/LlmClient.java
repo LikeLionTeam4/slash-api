@@ -2,9 +2,11 @@ package com.likelion.slash.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.llm.dto.LlmErrorResponse;
+import com.likelion.slash.llm.dto.LlmReadinessResponse;
 import com.likelion.slash.llm.dto.LlmSummaryRequest;
 import com.likelion.slash.llm.dto.LlmSummaryResponse;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,23 +46,34 @@ public class LlmClient {
     private static final Logger log = LoggerFactory.getLogger(LlmClient.class);
 
     private static final String SUMMARY_PATH = "/internal/v1/llm/summary";
+    private static final String READY_PATH = "/ready";
 
     /** 연결에 쓰는 몫. 같은 Cluster 안이라 빠르게 되거나 아예 안 된다. */
     private static final Duration CONNECT_TIMEOUT = Duration.ofMillis(500);
 
     private final RestClient restClient;
+
+    /** 준비 상태 전용. 요약보다 훨씬 짧은 제한을 쓴다. */
+    private final RestClient readyClient;
+
     private final ObjectMapper objectMapper;
 
     public LlmClient(RestClient.Builder builder,
                      ObjectMapper objectMapper,
                      @Value("${slash.llm.base-url}") String baseUrl,
-                     @Value("${slash.llm.timeout}") Duration timeout) {
+                     @Value("${slash.llm.timeout}") Duration timeout,
+                     @Value("${slash.llm.ready-timeout}") Duration readyTimeout) {
 
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout((int) CONNECT_TIMEOUT.toMillis());
         factory.setReadTimeout((int) timeout.minus(CONNECT_TIMEOUT).toMillis());
 
+        SimpleClientHttpRequestFactory readyFactory = new SimpleClientHttpRequestFactory();
+        readyFactory.setConnectTimeout((int) CONNECT_TIMEOUT.toMillis());
+        readyFactory.setReadTimeout((int) readyTimeout.toMillis());
+
         this.objectMapper = objectMapper;
+        this.readyClient = builder.clone().baseUrl(baseUrl).requestFactory(readyFactory).build();
         this.restClient = builder.clone()
                 .baseUrl(baseUrl)
                 .requestFactory(factory)
@@ -111,6 +124,41 @@ public class LlmClient {
             // 시간 초과·연결 실패. 응답 자체가 없어 코드를 알 수 없다.
             log.warn("요약 호출 실패 taskId={}: {}", taskId, e.toString());
             return new LlmSummaryOutcome.Failure(LlmFailure.unreachable());
+        }
+    }
+
+    /**
+     * 모델이 작업을 받을 수 있는 상태인지 묻는다.
+     *
+     * <p><b>요약 호출과 다른 시간 제한을 쓴다.</b> 이것은 사람을 기다리게 하지 않으려고 미리
+     * 물어보는 것이라, 오래 걸리면 물어본 의미가 없다. slash-llm 도 같은 이유로 이 경로에만
+     * 짧은 제한을 따로 둔다. ({@code LLM_READY_TIMEOUT} 기본 2초)
+     *
+     * <p>준비되지 않았으면 slash-llm 이 503 으로 답하는데, 그 본문에도 이유가 담겨 있어
+     * 오류로 다루지 않고 그대로 읽는다.
+     *
+     * @return 닿지 못했으면 비어 있다. 그 경우는 "모른다" 이지 "준비되지 않았다" 가 아니다.
+     */
+    public Optional<LlmReadinessResponse> ready() {
+        try {
+            return Optional.ofNullable(readyClient.get()
+                    .uri(READY_PATH)
+                    .retrieve()
+                    .body(LlmReadinessResponse.class));
+
+        } catch (RestClientResponseException e) {
+            // 503 도 계약된 응답이다. 본문에 not_ready 와 이유가 들어 있다.
+            try {
+                return Optional.ofNullable(
+                        objectMapper.readValue(e.getResponseBodyAsByteArray(), LlmReadinessResponse.class));
+            } catch (Exception ignored) {
+                log.debug("준비 상태 응답을 해석하지 못했다: status={}", e.getStatusCode());
+                return Optional.empty();
+            }
+
+        } catch (Exception e) {
+            log.debug("준비 상태를 묻지 못했다: {}", e.toString());
+            return Optional.empty();
         }
     }
 

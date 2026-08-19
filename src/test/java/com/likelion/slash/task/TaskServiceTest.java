@@ -33,6 +33,7 @@ import com.likelion.slash.device.SearchFolder;
 import com.likelion.slash.dispatch.TaskDispatcher;
 import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.llm.LlmReadiness;
 import com.likelion.slash.llm.LlmSummaryRunner;
 import com.likelion.slash.nlu.NluClient;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
@@ -96,6 +97,10 @@ class TaskServiceTest {
      */
     @MockitoBean
     private LlmSummaryRunner llmSummaryRunner;
+
+    /** 실제 slash-llm 에 묻지 않는다. 판정 자체는 LlmReadinessTest 가 본다. */
+    @MockitoBean
+    private LlmReadiness llmReadiness;
     /** 밖으로 나가는 호출이다. 계약은 WeatherClientTest 가 본다. */
     @MockitoBean
     private WeatherClient weatherClient;
@@ -108,6 +113,9 @@ class TaskServiceTest {
         this.사용자 = new AuthenticatedUser(
                 userId, UUID.randomUUID(), "tester@example.com", "시험 사용자",
                 "Asia/Seoul", "ACTIVE", SlashTime.now());
+
+        // 대역의 boolean 기본값은 거짓이라 명시하지 않으면 요약이 모두 거부된다.
+        given(llmReadiness.canAccept()).willReturn(true);
     }
 
     // ------------------------------------------------------------------
@@ -649,6 +657,24 @@ class TaskServiceTest {
 
         verify(llmSummaryRunner).runAsync(
                 eq(원장.getId()), eq(taskId), any(), eq(응답.taskId()), eq("요약할 긴 글"));
+    }
+
+    @Test
+    @DisplayName("모델이 받을 수 없으면 원장을 만들지 않고 바로 알린다")
+    void 준비되지_않으면_접수하지_않는다() {
+        given(llmReadiness.canAccept()).willReturn(false);
+        given(llmReadiness.reason()).willReturn(java.util.Optional.of("OLLAMA_UNAVAILABLE"));
+        NLU가(작업분석("TEXT_SUMMARY", Map.of("text", "요약할 긴 글")));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/summary 요약할 긴 글", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.LLM_NOT_READY.name());
+
+        // 만들어 두면 호출했다가 실패로 마감하는 일을 반복한다.
+        assertThat(dsl.fetchCount(ASYNC_JOBS, ASYNC_JOBS.TASK_ID.eq(작업조회(응답.taskId()).getId()))).isZero();
+        verify(llmSummaryRunner, never()).runAsync(anyLong(), anyLong(), any(), any(), any());
     }
 
     @Test
