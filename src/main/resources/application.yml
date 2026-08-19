@@ -107,6 +107,18 @@ slash:
     # 연결·응답 합계 2초. 자동 재시도 없음. (문서 3.7.1)
     timeout: 2s
 
+  weather:
+    # Open-Meteo. API 키가 필요 없어 Secrets Manager → ESO → env 배선 없이 붙는다.
+    # 지명을 좌표로 바꾸는 것과 그 좌표의 날씨를 받는 것이 서로 다른 호스트다.
+    geocoding-base-url: ${WEATHER_GEOCODING_BASE_URL:https://geocoding-api.open-meteo.com}
+    forecast-base-url: ${WEATHER_FORECAST_BASE_URL:https://api.open-meteo.com}
+
+    # 한 번의 조회에 주는 시간. 지오코딩과 예보를 각각 이 시간 안에 받는다.
+    #
+    # 밖으로 나가는 호출이라 NLU(같은 Cluster, 2초)보다 넉넉하게 잡되, 사용자가 응답을
+    # 기다리는 동안 도는 일이라 길게 두지 않는다. 실측은 두 번 합쳐 1초 안쪽이다.
+    timeout: 3s
+
   device:
     # Heartbeat 30초, 3회 누락 시 OFFLINE (문서 DV-02, NFR-07)
     heartbeat-interval: 30s
