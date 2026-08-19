@@ -83,16 +83,17 @@ public class LlmSummaryRunner {
      *
      * <p>스윕이 같은 Job 을 다시 집어도 안전하다 — {@code markRunning} 은 아직 끝나지 않은
      * Job 에만 걸리고, 마감은 상태를 확인한 뒤에만 반영된다.
+     *
+     * <p><b>모델 호출은 트랜잭션 밖에서 한다.</b> 시작·마감은 각각 원장과 Task 를 한 묶음으로
+     * 옮기지만, 그 사이의 기다림까지 묶으면 수십 초 동안 DB 연결을 붙들게 된다.
      */
     void run(long jobId, long taskId, UUID correlationId, UUID taskPublicId, String text) {
-        if (!asyncJobRepository.markRunning(jobId)) {
+        if (!Boolean.TRUE.equals(transactionTemplate.execute(status -> markStarted(jobId, taskId)))) {
             log.debug("이미 처리된 요약 작업이다 jobId={}", jobId);
             return;
         }
 
-        // 사용자에게 "시작했다"를 먼저 보여 준다. 모델이 오래 생각해도 화면이 멈춰 있지 않다.
-        stateWriter.move(taskId, TaskStatus.QUEUED, TaskStatus.RUNNING, null, "요약을 시작했습니다.");
-
+        // 모델 호출은 트랜잭션 밖이다. 여기까지 오면 시작 상태는 이미 커밋돼 있다.
         LlmSummaryOutcome outcome = llmClient.summarize(correlationId, taskPublicId, text);
         UUID resultEventId = UUID.randomUUID();
 
@@ -100,6 +101,25 @@ public class LlmSummaryRunner {
             case LlmSummaryOutcome.Success success -> succeed(jobId, taskId, resultEventId, success);
             case LlmSummaryOutcome.Failure failure -> fail(jobId, taskId, resultEventId, failure.failure());
         }
+    }
+
+    /**
+     * 원장과 Task 를 함께 실행 중으로 옮긴다.
+     *
+     * <p>나눠 두면 그 사이에 Pod 이 내려갔을 때 Job 은 {@code RUNNING} 인데 Task 는
+     * {@code QUEUED} 로 갈린다. 스윕이 되살리므로 영구적인 손상은 아니지만, 그때까지
+     * 화면에는 시작되지 않은 것으로 보인다. 접수·마감과 같은 규칙을 여기에도 둔다.
+     *
+     * @return 이번 호출이 시작을 맡았으면 참. 거짓이면 다른 Pod 이 이미 집었거나 끝난 작업이다.
+     */
+    private boolean markStarted(long jobId, long taskId) {
+        if (!asyncJobRepository.markRunning(jobId)) {
+            return false;
+        }
+
+        // 사용자에게 "시작했다"를 먼저 보여 준다. 모델이 오래 생각해도 화면이 멈춰 있지 않다.
+        stateWriter.move(taskId, TaskStatus.QUEUED, TaskStatus.RUNNING, null, "요약을 시작했습니다.");
+        return true;
     }
 
     private void succeed(long jobId, long taskId, UUID resultEventId, LlmSummaryOutcome.Success success) {

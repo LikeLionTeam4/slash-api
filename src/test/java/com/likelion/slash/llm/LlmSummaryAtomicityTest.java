@@ -33,7 +33,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 /**
- * 원장과 Task 가 <b>항상 함께</b> 움직이는지 확인. 접수와 마감 둘 다 본다.
+ * 원장과 Task 가 <b>항상 함께</b> 움직이는지 확인. 접수·마감·만료를 모두 본다.
  *
  * <p><b>둘이 갈라지면 아무도 복구할 수 없는 상태가 된다.</b> 원장 없이 {@code QUEUED} 인
  * Task 는 스윕이 찾지 못하고(스윕은 원장을 보고 돈다), 화면에는 끝나지 않는 진행 표시만 남는다.
@@ -52,6 +52,9 @@ class LlmSummaryAtomicityTest {
 
     @Autowired
     private LlmSummaryRunner runner;
+
+    @Autowired
+    private LlmJobSweeper sweeper;
 
     /** 원장 생성만 실패시키기 위해 감싼다. 나머지 동작은 실제 그대로 둔다. */
     @MockitoSpyBean
@@ -130,6 +133,56 @@ class LlmSummaryAtomicityTest {
         assertThat(원장상태(job.getId())).isNotEqualTo(AsyncJobStatus.SUCCEEDED.name());
 
         willCallRealMethod().given(stateWriter).succeed(anyLong(), any(), any());
+    }
+
+    @Test
+    @DisplayName("시작 전이도 원장과 작업이 함께 움직인다")
+    void 시작도_함께_옮긴다() {
+        var job = enqueuer.enqueue(taskId, TaskType.TEXT_SUMMARY, 입력(),
+                "요약해줘", SlashTime.now().plus(Duration.ofMinutes(5))).orElseThrow();
+
+        willThrow(new IllegalStateException("작업 전이 실패"))
+                .given(stateWriter).move(anyLong(), any(), any(), any(), any());
+
+        assertThatThrownBy(() -> runner.run(job.getId(), taskId,
+                UUID.randomUUID(), 작업공개id(), "요약할 긴 글"))
+                .isInstanceOf(IllegalStateException.class);
+
+        // 원장만 RUNNING 이 되면 Task 는 QUEUED 로 갈려, 스윕이 되살릴 때까지 화면에는
+        // 시작되지 않은 것으로 보인다.
+        assertThat(원장상태(job.getId())).isNotEqualTo(AsyncJobStatus.RUNNING.name());
+
+        willCallRealMethod().given(stateWriter).move(anyLong(), any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("만료 마감도 원장과 작업이 함께 닫힌다")
+    void 만료도_함께_닫는다() {
+        var job = enqueuer.enqueue(taskId, TaskType.TEXT_SUMMARY, 입력(),
+                "요약해줘", SlashTime.now().plus(Duration.ofMinutes(5))).orElseThrow();
+        기한이_지나게_만든다(job.getId());
+
+        willThrow(new IllegalStateException("작업 마감 실패"))
+                .given(stateWriter).failFromWorker(anyLong(), any(), any());
+
+        // sweep() 은 예외를 밖으로 내지 않는다 — 한 회차의 실패로 스케줄이 멈추면 안 되기
+        // 때문이다. 그래도 트랜잭션은 되돌아가야 한다.
+        sweeper.sweep();
+
+        // 원장만 EXPIRED 로 닫히면 Task 는 진행 상태로 남는데, 그 Job 은 더 이상 활성이
+        // 아니라 다음 회차 조회에도 걸리지 않는다.
+        assertThat(원장상태(job.getId())).isNotEqualTo(AsyncJobStatus.EXPIRED.name());
+
+        willCallRealMethod().given(stateWriter).failFromWorker(anyLong(), any(), any());
+    }
+
+    /** {@code ck_async_jobs_deadline_after_created} 때문에 만든 시각도 함께 민다. */
+    private void 기한이_지나게_만든다(long jobId) {
+        dsl.update(ASYNC_JOBS)
+                .set(ASYNC_JOBS.CREATED_AT, SlashTime.now().minus(Duration.ofHours(2)))
+                .set(ASYNC_JOBS.DEADLINE_AT, SlashTime.now().minus(Duration.ofHours(1)))
+                .where(ASYNC_JOBS.ID.eq(jobId))
+                .execute();
     }
 
     private JSONB 입력() {

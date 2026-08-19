@@ -18,6 +18,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 
 /**
  * 시작되지 못한 요약 작업을 다시 돌리고, 기한이 지난 것은 마감한다. (이슈 #36 과 같은 결)
@@ -41,6 +43,9 @@ public class LlmJobSweeper {
     private final LlmSummaryRunner runner;
     private final ObjectMapper objectMapper;
 
+    /** 만료 마감을 원장과 Task 한 묶음으로 처리한다. 이유는 {@link LlmSummaryRunner} 와 같다. */
+    private final TransactionTemplate transactionTemplate;
+
     /** 이만큼 지나도 시작되지 않았으면 놓친 것으로 본다. */
     private final Duration staleAfter;
 
@@ -52,6 +57,7 @@ public class LlmJobSweeper {
                          TaskStateWriter stateWriter,
                          LlmSummaryRunner runner,
                          ObjectMapper objectMapper,
+                         PlatformTransactionManager transactionManager,
                          @Value("${slash.llm.job-sweep.stale-after}") Duration staleAfter,
                          @Value("${slash.llm.job-sweep.batch-size}") int batchSize) {
         this.asyncJobRepository = asyncJobRepository;
@@ -59,6 +65,7 @@ public class LlmJobSweeper {
         this.stateWriter = stateWriter;
         this.runner = runner;
         this.objectMapper = objectMapper;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.staleAfter = staleAfter;
         this.batchSize = batchSize;
     }
@@ -93,17 +100,22 @@ public class LlmJobSweeper {
             return;
         }
 
-        // 조회한 것만 마감한다. 조건으로 한 번에 갱신하면 배치를 넘긴 Job 까지 EXPIRED 가 되는데
-        // 그 Task 는 여기서 닫지 못해 열린 채로 남고, 다음 회차 조회에도 걸리지 않는다.
-        asyncJobRepository.expire(
-                overdue.stream().map(AsyncJobsRecord::getId).toList(),
-                ErrorCode.UPSTREAM_UNAVAILABLE.name());
+        // 원장과 Task 를 한 트랜잭션에서 닫는다. 나눠 두면 그 사이에 Pod 이 내려갔을 때
+        // 원장만 EXPIRED 가 되고 Task 는 진행 상태로 남는데, 그 Job 은 더 이상 활성이 아니라
+        // 다음 회차 조회에도 걸리지 않는다. 성공·실패 마감과 같은 이유다. (PR #42 리뷰)
+        transactionTemplate.executeWithoutResult(status -> {
+            // 조회한 것만 마감한다. 조건으로 한 번에 갱신하면 배치를 넘긴 Job 까지 EXPIRED 가
+            // 되는데 그 Task 는 여기서 닫지 못해 열린 채로 남는다.
+            asyncJobRepository.expire(
+                    overdue.stream().map(AsyncJobsRecord::getId).toList(),
+                    ErrorCode.UPSTREAM_UNAVAILABLE.name());
 
-        for (AsyncJobsRecord job : overdue) {
-            // 시작조차 못 했으면 QUEUED, 호출 중이었으면 RUNNING 이다. 어느 쪽이든 닫는다.
-            stateWriter.failFromWorker(job.getTaskId(), ErrorCode.UPSTREAM_UNAVAILABLE,
-                    "요약이 제한 시간 안에 끝나지 않았습니다.");
-        }
+            for (AsyncJobsRecord job : overdue) {
+                // 시작조차 못 했으면 QUEUED, 호출 중이었으면 RUNNING 이다. 어느 쪽이든 닫는다.
+                stateWriter.failFromWorker(job.getTaskId(), ErrorCode.UPSTREAM_UNAVAILABLE,
+                        "요약이 제한 시간 안에 끝나지 않았습니다.");
+            }
+        });
         log.info("기한이 지난 요약 작업 {}건을 마감했다", overdue.size());
     }
 
