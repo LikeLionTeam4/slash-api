@@ -61,11 +61,18 @@ class LlmJobSweeperTest {
     @MockitoBean
     private LlmSummaryRunner runner;
 
+    /** 실제 slash-llm 에 묻지 않는다. 판정 자체는 LlmReadinessTest 가 본다. */
+    @MockitoBean
+    private LlmReadiness readiness;
+
     private long taskId;
 
     @BeforeEach
     void setUp() {
         taskId = 작업(dsl, 사용자(dsl), null, TaskStatus.QUEUED.name());
+
+        // 대역의 boolean 기본값은 거짓이라 명시하지 않으면 재시도가 모두 건너뛰어진다.
+        given(readiness.canAccept()).willReturn(true);
     }
 
     @Test
@@ -91,6 +98,21 @@ class LlmJobSweeperTest {
         sweeper.sweep();
 
         verify(runner).runAsync(eq(jobId), eq(taskId), any(), any(), eq("요약할 긴 글"));
+    }
+
+    @Test
+    @DisplayName("모델이 받을 수 없으면 재시도를 미룬다")
+    void 받을_수_없으면_미룬다() {
+        given(readiness.canAccept()).willReturn(false);
+        given(readiness.reason()).willReturn(java.util.Optional.of("OLLAMA_UNAVAILABLE"));
+        long jobId = 원장을_만든다(SlashTime.now().plusMinutes(5));
+        오래된_작업으로_만든다(jobId);
+
+        sweeper.sweep();
+
+        // 다시 돌려 봐야 같은 실패를 반복한다. 켜지면 그때 이어서 돌린다.
+        verify(runner, never()).runAsync(anyLong(), anyLong(), any(), any(), any());
+        assertThat(원장조회(jobId).getStatus()).isEqualTo(AsyncJobStatus.QUEUED.name());
     }
 
     @Test

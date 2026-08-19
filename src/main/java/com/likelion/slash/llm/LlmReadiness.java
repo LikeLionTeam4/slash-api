@@ -33,13 +33,24 @@ public class LlmReadiness {
     /**
      * 마지막으로 확인한 상태. 주기 작업이 쓰고 요청 처리 스레드가 읽으므로 {@code volatile} 이다.
      *
-     * <p>비어 있으면 아직 모른다는 뜻이다. {@code false} 와 구분한다 — 앞은 통과시키고
-     * 뒤는 막는다.
+     * <p><b>한 덩어리로 바꾼다.</b> 준비 여부와 이유를 따로 쓰면 그 사이 아주 짧은 순간에
+     * 서로 다른 회차의 값이 함께 읽힌다. 영향은 로그 문구 정도지만 나눌 이유도 없다.
+     * (PR #44 리뷰)
      */
-    private volatile Boolean ready;
+    private volatile State state = State.UNKNOWN;
 
-    /** 상태가 바뀔 때만 로그를 남긴다. 회차마다 같은 줄을 쌓지 않는다. */
-    private volatile String lastReason;
+    /**
+     * @param ready 비어 있으면 아직 모른다는 뜻이다. {@code false} 와 구분한다 —
+     *              앞은 통과시키고 뒤는 막는다.
+     */
+    private record State(Boolean ready, String reason) {
+
+        static final State UNKNOWN = new State(null, null);
+
+        boolean canAccept() {
+            return ready == null || ready;
+        }
+    }
 
     public LlmReadiness(LlmClient llmClient) {
         this.llmClient = llmClient;
@@ -51,12 +62,12 @@ public class LlmReadiness {
      * @return 아직 모르면 참. 모른다는 이유로 막지 않는다.
      */
     public boolean canAccept() {
-        return ready == null || ready;
+        return state.canAccept();
     }
 
     /** 마지막으로 확인한 이유. 준비된 상태이거나 아직 모르면 비어 있다. */
     public Optional<String> reason() {
-        return Optional.ofNullable(lastReason);
+        return Optional.ofNullable(state.reason());
     }
 
     /**
@@ -74,7 +85,7 @@ public class LlmReadiness {
 
         if (answer.isEmpty()) {
             // 닿지 못한 것은 "준비되지 않았다" 가 아니다. 마지막으로 알던 값을 그대로 둔다.
-            log.debug("요약 모델 준비 상태를 확인하지 못했다. 이전 값을 유지한다: {}", ready);
+            log.debug("요약 모델 준비 상태를 확인하지 못했다. 이전 값을 유지한다: {}", state.ready());
             return;
         }
 
@@ -82,7 +93,7 @@ public class LlmReadiness {
         boolean nowReady = response.isReady();
         String nowReason = nowReady ? null : response.reason();
 
-        if (!Boolean.valueOf(nowReady).equals(ready)) {
+        if (!Boolean.valueOf(nowReady).equals(state.ready())) {
             if (nowReady) {
                 log.info("요약 모델이 준비됐다 model={}", response.model());
             } else {
@@ -90,7 +101,6 @@ public class LlmReadiness {
             }
         }
 
-        this.ready = nowReady;
-        this.lastReason = nowReason;
+        this.state = new State(nowReady, nowReason);
     }
 }
