@@ -83,6 +83,40 @@ public class AsyncJobRepository {
     // 진행
     // ------------------------------------------------------------------
 
+    /**
+     * 시작되지 못한 채 남아 있는 Job 을 찾는다.
+     *
+     * <p><b>{@code RUNNING} 도 대상이다.</b> 호출 도중에 Pod 이 죽으면 그 Job 은 {@code RUNNING}
+     * 인 채로 굳어 아무도 손대지 않는다. {@code started_at} 이 충분히 오래됐으면 그 경우로 본다.
+     * 살아 있는 호출을 잘못 집어도 {@code result_event_id} 와 상태 조건이 결과를 한 번만
+     * 반영하므로 사용자에게 두 번 보이지는 않는다.
+     *
+     * @param startedBefore 이 시각보다 앞서 시작된 것만 본다. 지금 막 시작한 Job 을 집지 않기 위해서다.
+     */
+    public List<AsyncJobsRecord> findStale(AsyncJobType jobType, OffsetDateTime startedBefore, int limit) {
+        return dsl.selectFrom(ASYNC_JOBS)
+                .where(ASYNC_JOBS.JOB_TYPE.eq(jobType.name()))
+                .and(ASYNC_JOBS.STATUS.in(ACTIVE_STATUSES))
+                .and(ASYNC_JOBS.DEADLINE_AT.gt(SlashTime.now()))
+                .and(ASYNC_JOBS.CREATED_AT.lt(startedBefore))
+                .orderBy(ASYNC_JOBS.CREATED_AT)
+                .limit(limit)
+                .fetch();
+    }
+
+    /**
+     * 기한이 지난 미완료 Job 을 찾는다. 마감은 {@link #expireOverdue} 가 한 문장으로 하되,
+     * 그에 딸린 Task 도 함께 마감하려면 어떤 Job 이었는지 알아야 한다.
+     */
+    public List<AsyncJobsRecord> findOverdue(OffsetDateTime now, int limit) {
+        return dsl.selectFrom(ASYNC_JOBS)
+                .where(ASYNC_JOBS.STATUS.in(ACTIVE_STATUSES))
+                .and(ASYNC_JOBS.DEADLINE_AT.le(now))
+                .orderBy(ASYNC_JOBS.DEADLINE_AT)
+                .limit(limit)
+                .fetch();
+    }
+
     /** Outbox 전달기가 SQS 발행에 성공했다. */
     public boolean markQueued(long id) {
         return dsl.update(ASYNC_JOBS)

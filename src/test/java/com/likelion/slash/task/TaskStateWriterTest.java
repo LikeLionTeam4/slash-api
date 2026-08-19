@@ -80,7 +80,7 @@ class TaskStateWriterTest {
     @DisplayName("이미 마감된 작업에는 결과를 덮어쓰지 않는다")
     void 마감된_작업은_건드리지_않는다() {
         long taskId = 실행중인_작업();
-        stateWriter.failFromAgent(taskId, ErrorCode.POLICY_DENIED, "거부됨");
+        stateWriter.failFromWorker(taskId, ErrorCode.POLICY_DENIED, "거부됨");
 
         // 기한 만료 스윕이 먼저 닿은 뒤 결과가 늦게 도착하는 경우다. 늦게 온 쪽이 물러난다.
         assertThat(stateWriter.succeed(taskId, JSONB.valueOf("{\"cpu\":12}"), "작업을 마쳤습니다.")).isFalse();
@@ -111,8 +111,8 @@ class TaskStateWriterTest {
         long 실행중_작업 = 실행중인_작업();
 
         // ACK 거부는 QUEUED 에서, RESULT 실패는 RUNNING 에서 온다.
-        assertThat(stateWriter.failFromAgent(전달만_된_작업, ErrorCode.TASK_TYPE_NOT_SUPPORTED, "미지원")).isTrue();
-        assertThat(stateWriter.failFromAgent(실행중_작업, ErrorCode.POLICY_DENIED, "거부됨")).isTrue();
+        assertThat(stateWriter.failFromWorker(전달만_된_작업, ErrorCode.TASK_TYPE_NOT_SUPPORTED, "미지원")).isTrue();
+        assertThat(stateWriter.failFromWorker(실행중_작업, ErrorCode.POLICY_DENIED, "거부됨")).isTrue();
 
         assertThat(조회(전달만_된_작업).getErrorCode()).isEqualTo(ErrorCode.TASK_TYPE_NOT_SUPPORTED.name());
         assertThat(조회(실행중_작업).getErrorCode()).isEqualTo(ErrorCode.POLICY_DENIED.name());

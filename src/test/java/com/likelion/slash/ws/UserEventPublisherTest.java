@@ -111,7 +111,7 @@ class UserEventPublisherTest {
         long userId = 사용자(dsl);
         long taskId = 작업(dsl, userId, 준비된_기기(dsl, userId), TaskStatus.RUNNING.name());
 
-        stateWriter.failFromAgent(taskId, ErrorCode.POLICY_DENIED, "거부됨");
+        stateWriter.failFromWorker(taskId, ErrorCode.POLICY_DENIED, "거부됨");
 
         verify(publisher, times(2)).send(eq(WsTarget.USER), eq(userId), any());
 

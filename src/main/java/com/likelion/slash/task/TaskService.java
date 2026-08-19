@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.auth.AuthenticatedUser;
 import com.likelion.slash.common.Sha256;
 import com.likelion.slash.common.SlashTime;
+import com.likelion.slash.common.enums.AsyncJobType;
 import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
@@ -13,9 +14,12 @@ import com.likelion.slash.common.error.SlashException;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.device.DeviceSearchFolderRepository;
 import com.likelion.slash.dispatch.TaskDispatcher;
+import com.likelion.slash.job.AsyncJobRepository;
+import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import com.likelion.slash.jooq.tables.records.IdempotencyRecordsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.llm.LlmSummaryRunner;
 import com.likelion.slash.nlu.NluClient;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
 import com.likelion.slash.task.dto.CreateRequestRequest;
@@ -30,6 +34,7 @@ import java.util.UUID;
 import org.jooq.JSONB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -62,6 +67,9 @@ public class TaskService {
     /** FILE_SEARCH 의 서버가 채우는 입력값. Agent 가 READY 로 보고한 폴더 중 하나를 넣는다. */
     private static final String PARAMETER_SEARCH_FOLDER_ID = "searchFolderId";
 
+    /** TEXT_SUMMARY 의 원문. NLU 가 채운다. */
+    private static final String PARAMETER_TEXT = "text";
+
     /** 멱등 기록의 범위. 같은 키라도 다른 Endpoint 면 별개로 본다. */
     private static final String REQUEST_PATH = "/api/v1/requests";
 
@@ -76,6 +84,16 @@ public class TaskService {
     private final NluClient nluClient;
     private final TaskDispatcher taskDispatcher;
     private final ObjectMapper objectMapper;
+    private final AsyncJobRepository asyncJobRepository;
+    private final LlmSummaryRunner llmSummaryRunner;
+
+    /**
+     * 요약 작업의 기한. 이 시각까지 끝나지 않으면 스윕이 마감한다.
+     *
+     * <p>전달 기한과 따로 두는 이유 — 전달은 켜져 있는 PC 에만 만들어 60초면 충분하지만,
+     * 요약은 모델이 밀려 있으면 그보다 오래 걸린다.
+     */
+    private final Duration summaryDeadline;
 
     public TaskService(TaskRepository taskRepository,
                        TaskStateWriter stateWriter,
@@ -84,7 +102,10 @@ public class TaskService {
                        DeviceSearchFolderRepository deviceSearchFolderRepository,
                        NluClient nluClient,
                        TaskDispatcher taskDispatcher,
-                       ObjectMapper objectMapper) {
+                       ObjectMapper objectMapper,
+                       AsyncJobRepository asyncJobRepository,
+                       LlmSummaryRunner llmSummaryRunner,
+                       @Value("${slash.llm.job-deadline}") Duration summaryDeadline) {
         this.taskRepository = taskRepository;
         this.stateWriter = stateWriter;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
@@ -93,6 +114,9 @@ public class TaskService {
         this.nluClient = nluClient;
         this.taskDispatcher = taskDispatcher;
         this.objectMapper = objectMapper;
+        this.asyncJobRepository = asyncJobRepository;
+        this.llmSummaryRunner = llmSummaryRunner;
+        this.summaryDeadline = summaryDeadline;
     }
 
     // ------------------------------------------------------------------
@@ -273,8 +297,7 @@ public class TaskService {
             case LOCAL_AGENT -> routeToDevice(user, task, taskType, nlu, selectedDeviceId);
             case BACKEND_SERVICE -> notReadyYet(task, taskType, ErrorCode.UPSTREAM_UNAVAILABLE,
                     "날씨 조회는 아직 연결되어 있지 않습니다.");
-            case LLM_SERVICE -> notReadyYet(task, taskType, ErrorCode.LLM_NOT_READY,
-                    "요약은 아직 연결되어 있지 않습니다.");
+            case LLM_SERVICE -> routeToLlm(task, taskType, nlu);
         };
     }
 
@@ -362,6 +385,56 @@ public class TaskService {
                     "선택한 PC 가 다른 작업을 실행 중입니다.");
             return TaskStatus.FAILED;
         }
+    }
+
+    /**
+     * 요약을 맡긴다. (slash-llm {@code docs/BACKEND_CONTRACT.md})
+     *
+     * <p><b>여기서 모델을 기다리지 않는다.</b> {@code QUEUED} 까지만 옮기고 원장을 남긴 뒤
+     * 곧바로 응답한다. 실제 호출은 {@link LlmSummaryRunner} 가 뒤에서 하고, 화면은 WSS·폴링으로
+     * 따라온다. ({@code docs/frontend-api-contract.md} §7)
+     *
+     * <p><b>기기를 고르지 않는다.</b> 요약은 서버 쪽 모델이 하는 일이라 PC 가 없어도 된다.
+     * ({@code TaskType#requiresDevice} 가 거짓이고 {@code ck_tasks_local_agent_requires_device} 도
+     * 로컬 실행 작업에만 기기를 요구한다)
+     *
+     * <p>원장을 먼저 남기는 이유는 전달과 같다 — Pod 이 호출 도중에 죽어도 작업이 사라지지
+     * 않고 {@link com.likelion.slash.llm.LlmJobSweeper} 가 이어받는다.
+     */
+    private TaskStatus routeToLlm(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
+        Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
+        JSONB input = toJsonb(parameters);
+
+        boolean applied = stateWriter.applyAnalysisAndMove(
+                task.getId(),
+                taskType,
+                ProcessingRoute.LLM_SERVICE,
+                null,
+                input,
+                summarize(task.getInputText()),
+                TaskStatus.QUEUED,
+                null,
+                "요약을 맡겼습니다.");
+
+        if (!applied) {
+            return currentStatusOf(task.getId());
+        }
+
+        AsyncJobsRecord job = asyncJobRepository.create(
+                task.getId(), AsyncJobType.TEXT_SUMMARY, input, SlashTime.now().plus(summaryDeadline));
+
+        // PENDING 은 "아직 아무에게도 맡기지 않은" 상태다. 지금은 SQS 없이 곧바로 부르므로
+        // 맡긴 시점이 여기다. (SQS 로 옮기면 발행에 성공한 시점으로 옮겨 간다)
+        asyncJobRepository.markQueued(job.getId());
+
+        llmSummaryRunner.runAsync(
+                job.getId(),
+                task.getId(),
+                task.getCorrelationId(),
+                task.getPublicId(),
+                String.valueOf(parameters.get(PARAMETER_TEXT)));
+
+        return TaskStatus.QUEUED;
     }
 
     /**

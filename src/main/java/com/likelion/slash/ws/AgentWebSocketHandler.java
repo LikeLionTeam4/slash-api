@@ -519,7 +519,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                 frame.path("reasonCode").asText(null), ErrorCode.AGENT_REJECTED);
 
         agentDispatchRepository.fail(id, reason.name());
-        stateWriter.failFromAgent(taskId, reason, reason.defaultMessage());
+        stateWriter.failFromWorker(taskId, reason, reason.defaultMessage());
     }
 
     /**
@@ -557,7 +557,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                     frame.path("error").path("code").asText(null), ErrorCode.AGENT_TASK_FAILED);
 
             agentDispatchRepository.fail(id, reason.name());
-            persisted = stateWriter.failFromAgent(taskId, reason, agentMessage(frame, reason));
+            persisted = stateWriter.failFromWorker(taskId, reason, agentMessage(frame, reason));
         }
 
         sendResultAck(session, taskId, dispatch.getPublicId(), persisted);
@@ -582,7 +582,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
 
         } catch (DataAccessException e) {
             log.warn("결과를 저장하지 못해 실패로 마감한다 taskId={}: {}", taskId, e.getMessage());
-            stateWriter.failFromAgent(taskId, ErrorCode.AGENT_TASK_FAILED,
+            stateWriter.failFromWorker(taskId, ErrorCode.AGENT_TASK_FAILED,
                     "결과가 너무 커서 저장하지 못했습니다.");
 
             // 마감은 했지만 결과를 담지는 못했다. persisted 는 담았는지를 뜻하므로 거짓이다.

@@ -99,6 +99,33 @@ slash:
     # 연결·응답 합계 2초. 자동 재시도 없음. (문서 3.7.1)
     timeout: 2s
 
+  llm:
+    # Helm 배포에서는 같은 Namespace 의 짧은 주소를 주입한다. Service 80 → 컨테이너 8000 이라
+    # 주입값에는 포트가 없다. 이 기본값은 로컬에서만 쓰인다.
+    # (slash-llm Dockerfile `EXPOSE 8000` · README 실행 예시)
+    base-url: ${LLM_BASE_URL:http://localhost:8000}
+
+    # NLU 와 달리 길게 잡는다. 분석은 사용자가 응답을 기다리는 동안 끝나야 하지만, 요약은
+    # 이미 QUEUED 로 답한 뒤 뒤에서 도는 일이라 모델에 생각할 시간을 준다.
+    timeout: 60s
+
+    # 요약 작업의 기한. 이 시각까지 끝나지 않으면 스윕이 마감한다.
+    # 위 timeout 보다 넉넉해야 한다 — 한 번의 호출이 아니라 다시 돌리는 것까지 포함한 기한이다.
+    job-deadline: 5m
+
+    # 시작되지 못한 요약 작업을 다시 돌리는 스윕.
+    #
+    # 실행은 별도 스레드에서 하고 그 스레드는 Pod 과 함께 사라진다. 호출 도중에 Pod 이
+    # 내려가면 작업은 원장에만 남으므로 이 스윕이 이어받는다.
+    job-sweep:
+      # @Scheduled 의 문자열 값은 30s 같은 표기를 해석하지 못해 여기만 밀리초로 적는다.
+      interval-ms: 30000
+      # 만들어진 지 이만큼 지나도 끝나지 않았으면 놓친 것으로 본다.
+      # 모델이 실제로 오래 걸리는 경우와 겹치지만, 다시 돌려도 결과는 한 번만 반영된다.
+      stale-after: 90s
+      # 한 회차에서 다룰 최대 건수.
+      batch-size: 50
+
   device:
     # Heartbeat 30초, 3회 누락 시 OFFLINE (문서 DV-02, NFR-07)
     heartbeat-interval: 30s
