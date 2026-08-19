@@ -1,8 +1,10 @@
 package com.likelion.slash.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.likelion.slash.common.enums.AsyncJobType;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.job.AsyncJobRepository;
+import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import com.likelion.slash.llm.dto.LlmSummaryResponse;
 import com.likelion.slash.task.TaskStateWriter;
 import java.util.LinkedHashMap;
@@ -13,6 +15,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 요약 작업을 실제로 돌린다. (문서 3.7)
@@ -24,6 +28,10 @@ import org.springframework.stereotype.Component;
  * <p><b>{@code agent_dispatches} 와 같은 짜임이다.</b> 원장({@code async_jobs})을 먼저 남기고
  * 곧바로 실행을 시작하되, 놓친 것은 스윕({@link LlmJobSweeper})이 줍는다. Pod 이 호출 도중에
  * 죽어도 작업은 원장에 남아 있다.
+ *
+ * <p><b>원장과 Task 는 항상 같은 트랜잭션에서 움직인다.</b> 접수도 마감도 마찬가지다. 둘이
+ * 갈라지면 그 사이의 장애가 <b>아무도 복구할 수 없는 상태</b>를 만든다 — 원장 없이 {@code QUEUED}
+ * 인 Task 는 스윕이 찾지 못하고, 원장만 마감된 Task 는 활성 조회에서 빠져 열린 채로 남는다.
  */
 @Component
 public class LlmSummaryRunner {
@@ -35,15 +43,27 @@ public class LlmSummaryRunner {
     private final TaskStateWriter stateWriter;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 마감을 한 트랜잭션으로 묶는 데 쓴다.
+     *
+     * <p>{@code @Transactional} 을 쓰지 않는 이유 — 마감은 이 클래스 안에서 부르는 것이라
+     * 프록시를 지나지 않아 애너테이션이 걸리지 않는다. 그렇다고 {@link #run} 전체를 트랜잭션으로
+     * 묶으면 모델을 기다리는 수십 초 동안 DB 연결을 붙들게 된다.
+     */
+    private final TransactionTemplate transactionTemplate;
+
     public LlmSummaryRunner(LlmClient llmClient,
                             AsyncJobRepository asyncJobRepository,
                             TaskStateWriter stateWriter,
-                            ObjectMapper objectMapper) {
+                            ObjectMapper objectMapper,
+                            PlatformTransactionManager transactionManager) {
         this.llmClient = llmClient;
         this.asyncJobRepository = asyncJobRepository;
         this.stateWriter = stateWriter;
         this.objectMapper = objectMapper;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
+
 
     /**
      * 요약을 시작한다. 호출한 쪽은 기다리지 않는다.
@@ -86,20 +106,24 @@ public class LlmSummaryRunner {
         LlmSummaryResponse response = success.response();
         JSONB result = toResult(response);
 
-        asyncJobRepository.succeed(jobId, resultEventId, result, response.model(), success.durationMilliseconds());
-        stateWriter.succeed(taskId, result, "요약을 마쳤습니다.");
+        transactionTemplate.executeWithoutResult(status -> {
+            asyncJobRepository.succeed(jobId, resultEventId, result, response.model(), success.durationMilliseconds());
+            stateWriter.succeed(taskId, result, "요약을 마쳤습니다.");
+        });
 
         log.info("요약 완료 taskId={} model={} {}ms", taskId, response.model(), success.durationMilliseconds());
     }
 
     private void fail(long jobId, long taskId, UUID resultEventId, LlmFailure failure) {
-        asyncJobRepository.fail(jobId, resultEventId, failure.code(), failure.retryable());
+        transactionTemplate.executeWithoutResult(status -> {
+            asyncJobRepository.fail(jobId, resultEventId, failure.code(), failure.retryable());
 
-        // 원장에는 slash-llm 의 코드가, 사용자에게는 우리 말이 남는다.
-        //
-        // RUNNING 으로 옮기지 못했을 수 있다 — 다른 Pod 이 먼저 집었거나 이미 마감된 경우다.
-        // 어느 상태에서든 닫히도록 맡긴다.
-        stateWriter.failFromWorker(taskId, failure.errorCode(), failure.message());
+            // 원장에는 slash-llm 의 코드가, 사용자에게는 우리 말이 남는다.
+            //
+            // RUNNING 으로 옮기지 못했을 수 있다 — 다른 Pod 이 먼저 집었거나 이미 마감된 경우다.
+            // 어느 상태에서든 닫히도록 맡긴다.
+            stateWriter.failFromWorker(taskId, failure.errorCode(), failure.message());
+        });
 
         log.info("요약 실패 taskId={} code={} retryable={}", taskId, failure.code(), failure.retryable());
     }

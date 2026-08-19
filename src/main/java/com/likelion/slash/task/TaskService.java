@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.auth.AuthenticatedUser;
 import com.likelion.slash.common.Sha256;
 import com.likelion.slash.common.SlashTime;
-import com.likelion.slash.common.enums.AsyncJobType;
 import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
@@ -14,11 +13,11 @@ import com.likelion.slash.common.error.SlashException;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.device.DeviceSearchFolderRepository;
 import com.likelion.slash.dispatch.TaskDispatcher;
-import com.likelion.slash.job.AsyncJobRepository;
 import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import com.likelion.slash.jooq.tables.records.IdempotencyRecordsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.llm.LlmSummaryEnqueuer;
 import com.likelion.slash.llm.LlmSummaryRunner;
 import com.likelion.slash.nlu.NluClient;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
@@ -84,7 +83,7 @@ public class TaskService {
     private final NluClient nluClient;
     private final TaskDispatcher taskDispatcher;
     private final ObjectMapper objectMapper;
-    private final AsyncJobRepository asyncJobRepository;
+    private final LlmSummaryEnqueuer llmSummaryEnqueuer;
     private final LlmSummaryRunner llmSummaryRunner;
 
     /**
@@ -103,7 +102,7 @@ public class TaskService {
                        NluClient nluClient,
                        TaskDispatcher taskDispatcher,
                        ObjectMapper objectMapper,
-                       AsyncJobRepository asyncJobRepository,
+                       LlmSummaryEnqueuer llmSummaryEnqueuer,
                        LlmSummaryRunner llmSummaryRunner,
                        @Value("${slash.llm.job-deadline}") Duration summaryDeadline) {
         this.taskRepository = taskRepository;
@@ -114,7 +113,7 @@ public class TaskService {
         this.nluClient = nluClient;
         this.taskDispatcher = taskDispatcher;
         this.objectMapper = objectMapper;
-        this.asyncJobRepository = asyncJobRepository;
+        this.llmSummaryEnqueuer = llmSummaryEnqueuer;
         this.llmSummaryRunner = llmSummaryRunner;
         this.summaryDeadline = summaryDeadline;
     }
@@ -400,35 +399,26 @@ public class TaskService {
      *
      * <p>원장을 먼저 남기는 이유는 전달과 같다 — Pod 이 호출 도중에 죽어도 작업이 사라지지
      * 않고 {@link com.likelion.slash.llm.LlmJobSweeper} 가 이어받는다.
+     *
+     * <p><b>Task 전이와 원장 생성은 한 트랜잭션이어야 한다.</b> 그 묶음은
+     * {@link LlmSummaryEnqueuer#enqueue} 가 맡는다 — 여기서 나눠 부르면 그 사이의 실패가
+     * 원장 없는 {@code QUEUED} Task 를 남기고, 스윕은 원장을 보고 도는 것이라 찾지 못한다.
      */
     private TaskStatus routeToLlm(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
         Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
         JSONB input = toJsonb(parameters);
 
-        boolean applied = stateWriter.applyAnalysisAndMove(
-                task.getId(),
-                taskType,
-                ProcessingRoute.LLM_SERVICE,
-                null,
-                input,
-                summarize(task.getInputText()),
-                TaskStatus.QUEUED,
-                null,
-                "요약을 맡겼습니다.");
+        Optional<AsyncJobsRecord> job = llmSummaryEnqueuer.enqueue(
+                task.getId(), taskType, input, summarize(task.getInputText()),
+                SlashTime.now().plus(summaryDeadline));
 
-        if (!applied) {
+        if (job.isEmpty()) {
             return currentStatusOf(task.getId());
         }
 
-        AsyncJobsRecord job = asyncJobRepository.create(
-                task.getId(), AsyncJobType.TEXT_SUMMARY, input, SlashTime.now().plus(summaryDeadline));
-
-        // PENDING 은 "아직 아무에게도 맡기지 않은" 상태다. 지금은 SQS 없이 곧바로 부르므로
-        // 맡긴 시점이 여기다. (SQS 로 옮기면 발행에 성공한 시점으로 옮겨 간다)
-        asyncJobRepository.markQueued(job.getId());
-
+        // enqueue 가 돌아왔다는 것은 커밋됐다는 뜻이다. 이제 다른 Pod 과 스윕도 이 원장을 본다.
         llmSummaryRunner.runAsync(
-                job.getId(),
+                job.get().getId(),
                 task.getId(),
                 task.getCorrelationId(),
                 task.getPublicId(),

@@ -87,12 +87,17 @@ public class LlmJobSweeper {
      * <p>원장만 닫으면 Task 는 끝나지 않은 채 남는다. 둘을 함께 닫아야 화면의 진행 표시가 멎는다.
      */
     private void expireOverdue() {
-        List<AsyncJobsRecord> overdue = asyncJobRepository.findOverdue(SlashTime.now(), batchSize);
+        List<AsyncJobsRecord> overdue = asyncJobRepository.findOverdue(
+                AsyncJobType.TEXT_SUMMARY, SlashTime.now(), batchSize);
         if (overdue.isEmpty()) {
             return;
         }
 
-        asyncJobRepository.expireOverdue(SlashTime.now(), ErrorCode.UPSTREAM_UNAVAILABLE.name());
+        // 조회한 것만 마감한다. 조건으로 한 번에 갱신하면 배치를 넘긴 Job 까지 EXPIRED 가 되는데
+        // 그 Task 는 여기서 닫지 못해 열린 채로 남고, 다음 회차 조회에도 걸리지 않는다.
+        asyncJobRepository.expire(
+                overdue.stream().map(AsyncJobsRecord::getId).toList(),
+                ErrorCode.UPSTREAM_UNAVAILABLE.name());
 
         for (AsyncJobsRecord job : overdue) {
             // 시작조차 못 했으면 QUEUED, 호출 중이었으면 RUNNING 이다. 어느 쪽이든 닫는다.
@@ -118,7 +123,11 @@ public class LlmJobSweeper {
             }
 
             log.info("시작되지 못한 요약 작업을 다시 돌린다 jobId={} taskId={}", job.getId(), job.getTaskId());
-            runner.run(job.getId(), job.getTaskId(),
+
+            // 여기서 기다리지 않는다. 모델 호출은 최대 slash.llm.timeout 만큼 걸리는데,
+            // 이 스레드는 다른 주기 작업과 함께 쓰는 것이라(spring.task.scheduling.pool)
+            // 붙들면 스윕이 가장 필요한 순간에 나머지 스윕이 밀린다.
+            runner.runAsync(job.getId(), job.getTaskId(),
                     task.get().getCorrelationId(), task.get().getPublicId(), text.get());
         }
     }

@@ -10,6 +10,7 @@ import com.likelion.slash.common.enums.AsyncJobStatus;
 import com.likelion.slash.common.enums.AsyncJobType;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.error.ErrorCode;
+import java.util.List;
 import java.util.UUID;
 import org.jooq.DSLContext;
 import org.jooq.JSONB;
@@ -164,13 +165,32 @@ class AsyncJobRepositoryTest {
         var job = asyncJobRepository.create(요약_작업(), AsyncJobType.TEXT_SUMMARY, null,
                 SlashTime.now().plusMinutes(10));
 
-        int 마감한_건수 = asyncJobRepository.expireOverdue(
-                SlashTime.now().plusMinutes(20), ErrorCode.TASK_EXPIRED.name());
+        int 마감한_건수 = asyncJobRepository.expire(
+                List.of(job.getId()), ErrorCode.TASK_EXPIRED.name());
 
         assertThat(마감한_건수).isEqualTo(1);
         assertThat(asyncJobRepository.findByPublicId(job.getPublicId()))
                 .get()
                 .extracting(record -> record.getStatus())
                 .isEqualTo(AsyncJobStatus.EXPIRED.name());
+    }
+
+    @Test
+    @DisplayName("건네지 않은 Job 은 기한이 지났어도 그대로 둔다")
+    void 건네지_않은_것은_두고_본다() {
+        var 마감할_것 = asyncJobRepository.create(요약_작업(), AsyncJobType.TEXT_SUMMARY, null,
+                SlashTime.now().plusMinutes(10));
+        var 남겨둘_것 = asyncJobRepository.create(요약_작업(), AsyncJobType.TEXT_SUMMARY, null,
+                SlashTime.now().plusMinutes(10));
+
+        asyncJobRepository.expire(List.of(마감할_것.getId()), ErrorCode.TASK_EXPIRED.name());
+
+        // 조회한 것만 마감해야 한다. 조건으로 한꺼번에 갱신하면 배치를 넘긴 Job 까지 EXPIRED 가
+        // 되는데, 그에 딸린 Task 는 부르는 쪽이 닫지 못해 열린 채로 남는다. 그 Task 는 다음
+        // 회차 조회에도 걸리지 않아(이미 활성이 아니다) 영영 풀리지 않는다.
+        assertThat(asyncJobRepository.findByPublicId(남겨둘_것.getPublicId()))
+                .get()
+                .extracting(record -> record.getStatus())
+                .isEqualTo(AsyncJobStatus.PENDING.name());
     }
 }

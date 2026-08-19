@@ -7,6 +7,7 @@ import com.likelion.slash.common.enums.AsyncJobStatus;
 import com.likelion.slash.common.enums.AsyncJobType;
 import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -108,9 +109,10 @@ public class AsyncJobRepository {
      * 기한이 지난 미완료 Job 을 찾는다. 마감은 {@link #expireOverdue} 가 한 문장으로 하되,
      * 그에 딸린 Task 도 함께 마감하려면 어떤 Job 이었는지 알아야 한다.
      */
-    public List<AsyncJobsRecord> findOverdue(OffsetDateTime now, int limit) {
+    public List<AsyncJobsRecord> findOverdue(AsyncJobType jobType, OffsetDateTime now, int limit) {
         return dsl.selectFrom(ASYNC_JOBS)
-                .where(ASYNC_JOBS.STATUS.in(ACTIVE_STATUSES))
+                .where(ASYNC_JOBS.JOB_TYPE.eq(jobType.name()))
+                .and(ASYNC_JOBS.STATUS.in(ACTIVE_STATUSES))
                 .and(ASYNC_JOBS.DEADLINE_AT.le(now))
                 .orderBy(ASYNC_JOBS.DEADLINE_AT)
                 .limit(limit)
@@ -192,18 +194,27 @@ public class AsyncJobRepository {
     }
 
     /**
-     * 기한이 지난 미완료 Job 을 마감한다. ({@code idx_async_jobs_active_deadline})
+     * 기한이 지난 Job 을 마감한다. ({@code idx_async_jobs_active_deadline})
      *
-     * @return 마감한 건수
+     * <p><b>id 를 받는 이유 — 조회한 것과 마감하는 것이 어긋나면 안 된다.</b> 조건만으로
+     * 한 번에 갱신하면 배치 크기를 넘긴 Job 까지 {@code EXPIRED} 가 되는데, 그에 딸린 Task 는
+     * 부르는 쪽이 조회한 것만 마감하므로 <b>원장은 닫히고 Task 는 열린 채로 남는다.</b>
+     * 그 Task 는 다음 회차 조회에도 걸리지 않아(이미 {@code EXPIRED} 라 활성이 아니다)
+     * 영영 풀리지 않는다.
+     *
+     * @return 마감한 건수. 다른 Pod 이 먼저 닿았으면 요청한 수보다 적다.
      */
-    public int expireOverdue(OffsetDateTime now, String errorCode) {
+    public int expire(Collection<Long> ids, String errorCode) {
+        if (ids.isEmpty()) {
+            return 0;
+        }
         return dsl.update(ASYNC_JOBS)
                 .set(ASYNC_JOBS.STATUS, AsyncJobStatus.EXPIRED.name())
                 .set(ASYNC_JOBS.RESULT, (JSONB) null)
                 .set(ASYNC_JOBS.ERROR_CODE, errorCode)
                 .set(ASYNC_JOBS.COMPLETED_AT, SlashTime.now())
-                .where(ASYNC_JOBS.STATUS.in(ACTIVE_STATUSES))
-                .and(ASYNC_JOBS.DEADLINE_AT.le(now))
+                .where(ASYNC_JOBS.ID.in(ids))
+                .and(ASYNC_JOBS.STATUS.in(ACTIVE_STATUSES))
                 .execute();
     }
 }

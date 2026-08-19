@@ -86,7 +86,10 @@ class TaskServiceTest {
     @MockitoBean
     private TaskDispatcher taskDispatcher;
 
-    /** 실제 모델을 부르지 않는다. 실행 자체는 LlmSummaryRunnerTest 가 본다. */
+    /**
+     * 실행만 막는다. 접수({@link com.likelion.slash.llm.LlmSummaryEnqueuer})는 실제로 돌려서
+     * Task 전이와 원장이 한 트랜잭션에서 남는 것까지 본다. 모델 호출은 LlmSummaryRunnerTest 가 본다.
+     */
     @MockitoBean
     private LlmSummaryRunner llmSummaryRunner;
 

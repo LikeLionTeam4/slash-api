@@ -6,6 +6,10 @@ import static com.likelion.slash.support.TestFixtures.사용자;
 import static com.likelion.slash.support.TestFixtures.작업;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
 
 import com.likelion.slash.common.SlashTime;
@@ -48,8 +52,14 @@ class LlmJobSweeperTest {
     @Autowired
     private DSLContext dsl;
 
+    /**
+     * 실행을 맡기는 것까지만 본다.
+     *
+     * <p>{@code runAsync} 는 별도 스레드에서 도는데, 이 시험은 {@code @Transactional} 이라
+     * 아직 커밋되지 않은 원장을 그 스레드가 보지 못한다. 실제 실행은 LlmSummaryRunnerTest 가 본다.
+     */
     @MockitoBean
-    private LlmClient llmClient;
+    private LlmSummaryRunner runner;
 
     private long taskId;
 
@@ -75,17 +85,12 @@ class LlmJobSweeperTest {
     @Test
     @DisplayName("시작되지 못한 요약을 다시 돌린다")
     void 놓친_작업을_되살린다() {
-        given(llmClient.summarize(any(), any(), any()))
-                .willReturn(new LlmSummaryOutcome.Success(
-                        new LlmSummaryResponse("세 줄 요약", "gemma3:4b", null, null), 10));
-
         long jobId = 원장을_만든다(SlashTime.now().plusMinutes(5));
         오래된_작업으로_만든다(jobId);
 
         sweeper.sweep();
 
-        assertThat(원장조회(jobId).getStatus()).isEqualTo(AsyncJobStatus.SUCCEEDED.name());
-        assertThat(작업조회().getStatus()).isEqualTo(TaskStatus.SUCCEEDED.name());
+        verify(runner).runAsync(eq(jobId), eq(taskId), any(), any(), eq("요약할 긴 글"));
     }
 
     @Test
@@ -96,8 +101,8 @@ class LlmJobSweeperTest {
         sweeper.sweep();
 
         // 실행이 이미 돌고 있을 수 있다. 여기서 또 집으면 같은 글을 두 번 요약한다.
+        verify(runner, never()).runAsync(anyLong(), anyLong(), any(), any(), any());
         assertThat(원장조회(jobId).getStatus()).isEqualTo(AsyncJobStatus.QUEUED.name());
-        assertThat(원장조회(jobId).getAttemptCount()).isZero();
     }
 
     private long 원장을_만든다(OffsetDateTime 기한) {
