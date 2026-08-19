@@ -307,6 +307,76 @@ GET  /api/v1/tasks/{taskId}              → 200
 - `meta.requestId` — 오류를 문의할 때 이 값을 함께 알려주세요. 서버 로그를 이 값으로 찾습니다.
 - **`null` 인 필드는 응답에서 빠집니다.** 항상 존재한다고 가정하지 말고 옵셔널 체이닝으로 접근하세요.
 
+### 2.1 작업 결과(`result`) 형식
+
+`GET /api/v1/tasks/{taskId}` 의 `result` 는 **작업 유형마다 모양이 다릅니다.** `taskType` 으로
+갈라서 읽으세요. 작업이 끝나기 전에는 `null` 입니다.
+
+> **서버는 결과를 가공하지 않습니다.** PC 실행기와 slash-llm 이 만든 것을 그대로 저장하고
+> 그대로 돌려줍니다. 그래서 이 표가 곧 그쪽 구현입니다 — 아래 예시는 실제 응답을 받아 적은
+> 것이고, 바뀌면 이 문서도 함께 고칩니다.
+>
+> 다만 **드물게 나오는 값**(디스크를 읽지 못한 경우, 결과가 잘린 경우, 확장자 없는 파일)은
+> 재현하기 어려워 PC 실행기 코드를 근거로 적었습니다.
+
+#### `SYSTEM_STATUS`
+
+```json
+{ "cpuPercent": 23.8, "memoryPercent": 68, "memoryTotalMb": 24576, "memoryUsedMb": 16663,
+  "diskPercent": 28, "diskTotalMb": 948534, "diskUsedMb": 266522,
+  "collectedAt": "2026-08-19T16:47:37.742+09:00" }
+```
+
+**디스크 세 값은 없을 수 있습니다.** PC 실행기가 디스크 정보를 읽지 못하면 `null` 로 두는데,
+위 규칙대로 `null` 은 응답에서 빠지므로 **키 자체가 오지 않습니다.** 메모리·CPU 는 항상 옵니다.
+
+#### `FILE_SEARCH`
+
+```json
+{ "searchFolderId": "sf-fixtures-01",
+  "query": "회의록",
+  "items": [
+    { "fileRef": "f62dfe8a-8525-4ba9-a0b5-7f6d70ebfedd",
+      "name": "회의록_2026-07-01.txt",
+      "relativePath": "회의록_2026-07-01.txt",
+      "extension": "txt",
+      "sizeBytes": 95,
+      "modifiedAt": "2026-08-18T14:50:06.000+09:00" }
+  ],
+  "returnedCount": 1,
+  "truncated": false }
+```
+
+| 필드 | 설명 |
+|---|---|
+| `fileRef` | **파일을 가리키는 열쇠.** 절대 경로 대신 씁니다 — PC 안의 실제 경로는 클라우드로 오지 않습니다. 나중에 파일 열기 같은 후속 동작을 붙일 때 이 값을 그대로 돌려보내면 됩니다 |
+| `relativePath` | 검색 폴더 기준 상대 경로. 하위 폴더면 `sub/예산안_초안.txt` 처럼 옵니다. **화면에 보여 줄 값은 이것입니다** |
+| `extension` | 확장자(점 없음). 없으면 빈 문자열입니다 |
+| `truncated` | 상한을 넘어 잘렸는지. 참이면 "더 있습니다" 를 안내해 주세요 |
+
+`searchFolderId` 와 `query` 는 `task.parameters` 에도 있지만 **`result` 안에도 함께 옵니다.**
+어느 쪽을 읽어도 같습니다.
+
+#### `WEATHER_LOOKUP`
+
+```json
+{ "location": "수원시", "region": "경기도", "country": "대한민국",
+  "temperature": 26.7, "apparentTemperature": 32.0, "humidity": 84,
+  "precipitation": 0.0, "windSpeed": 5.2,
+  "description": "흐림", "observedAt": "2026-08-19T11:00" }
+```
+
+`description` 은 서버가 우리말로 옮긴 값입니다. 모르는 날씨 코드가 오면 **빈 문자열**이니
+비어 있을 때를 대비해 주세요 — 나머지 값은 정상입니다.
+
+#### `TEXT_SUMMARY`
+
+```json
+{ "summary": "슬래시는 사용자가 브라우저에서 …", "model": "gemma3:4b" }
+```
+
+`model` 은 어떤 모델이 만든 요약인지 남긴 값이라 화면에 보여 줄 필요는 없습니다.
+
 ---
 
 ## 3. 오류 응답

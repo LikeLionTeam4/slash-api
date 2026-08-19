@@ -527,6 +527,14 @@ class TaskServiceTest {
         assertThat(작업.getResult().data())
                 .contains("수원시").contains("경기도")
                 .contains("27.4").contains("구름 조금");
+
+        // 계약 문서 §2.1 에 적어 둔 필드가 그대로 나가야 한다. 화면이 그 표를 보고 타입을
+        // 만들기 때문에, 이름을 바꾸거나 빠뜨리면 문서가 거짓이 된다.
+        assertThat(작업.getResult().data())
+                .contains("\"location\"").contains("\"region\"").contains("\"country\"")
+                .contains("\"temperature\"").contains("\"apparentTemperature\"")
+                .contains("\"humidity\"").contains("\"precipitation\"").contains("\"windSpeed\"")
+                .contains("\"description\"").contains("\"observedAt\"");
     }
 
     @Test

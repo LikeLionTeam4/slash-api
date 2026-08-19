@@ -89,6 +89,9 @@ class LlmSummaryRunnerTest {
         TasksRecord 작업 = 작업조회();
         assertThat(작업.getStatus()).isEqualTo(TaskStatus.SUCCEEDED.name());
         assertThat(작업.getResult().data()).contains("세 줄 요약").contains("gemma3:4b");
+
+        // 계약 문서 §2.1 에 적어 둔 필드가 그대로 나가야 한다.
+        assertThat(작업.getResult().data()).contains("\"summary\"").contains("\"model\"");
     }
 
     @Test
