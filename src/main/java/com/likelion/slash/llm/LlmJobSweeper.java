@@ -41,6 +41,7 @@ public class LlmJobSweeper {
     private final TaskRepository taskRepository;
     private final TaskStateWriter stateWriter;
     private final LlmSummaryRunner runner;
+    private final LlmReadiness readiness;
     private final ObjectMapper objectMapper;
 
     /** 만료 마감을 원장과 Task 한 묶음으로 처리한다. 이유는 {@link LlmSummaryRunner} 와 같다. */
@@ -56,6 +57,7 @@ public class LlmJobSweeper {
                          TaskRepository taskRepository,
                          TaskStateWriter stateWriter,
                          LlmSummaryRunner runner,
+                         LlmReadiness readiness,
                          ObjectMapper objectMapper,
                          PlatformTransactionManager transactionManager,
                          @Value("${slash.llm.job-sweep.stale-after}") Duration staleAfter,
@@ -64,6 +66,7 @@ public class LlmJobSweeper {
         this.taskRepository = taskRepository;
         this.stateWriter = stateWriter;
         this.runner = runner;
+        this.readiness = readiness;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.staleAfter = staleAfter;
@@ -121,6 +124,15 @@ public class LlmJobSweeper {
 
     /** 시작되지 못한 작업을 다시 돌린다. */
     private void restartStale() {
+        // 모델이 받을 수 없는 상태면 다시 돌려 봐야 같은 실패를 반복한다. GPU 가 꺼져 있는
+        // 동안은 건드리지 않고 두었다가, 켜지면 그때 이어서 돌린다. 그 전에 기한이 차면
+        // 위 만료 마감이 정리한다. (PR #44 리뷰)
+        if (!readiness.canAccept()) {
+            log.debug("요약 모델이 작업을 받을 수 없어 재시도를 미룬다 reason={}",
+                    readiness.reason().orElse("UNKNOWN"));
+            return;
+        }
+
         List<AsyncJobsRecord> stale = asyncJobRepository.findStale(
                 AsyncJobType.TEXT_SUMMARY, SlashTime.now().minus(staleAfter), batchSize);
 

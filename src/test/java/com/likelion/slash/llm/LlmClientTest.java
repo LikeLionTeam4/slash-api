@@ -113,8 +113,8 @@ class LlmClientTest {
     @DisplayName("응답이 아예 없으면 다시 시도할 수 있는 실패로 본다")
     void 닿지_못하면_재시도_가능으로_본다() {
         // 아무도 듣지 않는 포트
-        LlmClient client = new LlmClient(
-                RestClient.builder(), objectMapper, "http://127.0.0.1:6397", Duration.ofSeconds(2));
+        LlmClient client = new LlmClient(RestClient.builder(), objectMapper,
+                "http://127.0.0.1:6397", Duration.ofSeconds(2), Duration.ofSeconds(1));
 
         LlmFailure failure = 실패(client.summarize(UUID.randomUUID(), UUID.randomUUID(), "요약할 긴 글"));
 
@@ -134,9 +134,59 @@ class LlmClientTest {
         assertThat(failure.errorCode()).isEqualTo(ErrorCode.UPSTREAM_UNAVAILABLE);
     }
 
+    @Test
+    @DisplayName("준비된 모델은 ready 로 답한다")
+    void 준비_상태를_읽는다() throws Exception {
+        준비상태_서버(200, """
+                {"status":"ready","model":"gemma3:4b"}""");
+
+        var answer = client().ready();
+
+        assertThat(answer).isPresent();
+        assertThat(answer.get().isReady()).isTrue();
+        assertThat(answer.get().model()).isEqualTo("gemma3:4b");
+    }
+
+    @Test
+    @DisplayName("503 도 계약된 답이라 이유까지 읽는다")
+    void 준비되지_않은_이유를_읽는다() throws Exception {
+        // 준비되지 않았음을 503 으로 알린다. 오류가 아니라 답이다.
+        준비상태_서버(503, """
+                {"status":"not_ready","model":"gemma3:4b","reason":"OLLAMA_UNAVAILABLE"}""");
+
+        var answer = client().ready();
+
+        assertThat(answer).isPresent();
+        assertThat(answer.get().isReady()).isFalse();
+        assertThat(answer.get().reason()).isEqualTo("OLLAMA_UNAVAILABLE");
+    }
+
+    @Test
+    @DisplayName("닿지 못하면 비어 있다 — 준비되지 않은 것과 다르다")
+    void 닿지_못하면_모른다() {
+        LlmClient client = new LlmClient(RestClient.builder(), objectMapper,
+                "http://127.0.0.1:6397", Duration.ofSeconds(2), Duration.ofSeconds(1));
+
+        // "준비되지 않았다" 가 아니라 "모른다" 다. 이것으로 기능을 막으면 안 된다.
+        assertThat(client.ready()).isEmpty();
+    }
+
+    private void 준비상태_서버(int status, String body) throws IOException {
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/ready", exchange -> {
+            try {
+                보낸다(exchange, status, body);
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+    }
+
     private LlmClient client() {
         return new LlmClient(RestClient.builder(), objectMapper,
-                "http://127.0.0.1:" + server.getAddress().getPort(), Duration.ofSeconds(5));
+                "http://127.0.0.1:" + server.getAddress().getPort(),
+                Duration.ofSeconds(5), Duration.ofSeconds(3));
     }
 
     private LlmFailure 실패(LlmSummaryOutcome outcome) {
