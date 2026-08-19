@@ -66,7 +66,7 @@ GET  /api/v1/devices                     → 200
 { "data": { "devices": [
     { "deviceId": "e0d68b9f-…", "name": "내 PC", "status": "READY",
       "os": "MACOS", "osVersion": "macOS-26.6.1-arm64-arm-64bit",
-      "agentVersion": "slash-agent-py/0.1.0", "acceptingTasks": true,
+      "agentVersion": "slash-pc-runner-py/0.4.0", "acceptingTasks": true,
       "lastSeenAt": "2026-08-13T10:24:01.431535+09:00",
       "registeredAt": "2026-08-12T17:50:19.195244+09:00", "version": 0 } ] } }
 
