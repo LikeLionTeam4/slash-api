@@ -273,6 +273,22 @@ public class DeviceRepository {
                 .fetchOptional();
     }
 
+    /**
+     * 상태·기한을 보지 않고 Token 해시로만 찾는다.
+     *
+     * <p><b>거부 사유를 구분할 때만 쓴다.</b> {@link #findByActiveTokenHash} 가 비어 있을 때
+     * 그것이 해제된 기기인지 만료된 Token 인지 가리기 위한 것이고, 접속을 허용하는 판정에는
+     * 쓰지 않는다.
+     *
+     * <p>해제 사실을 알려 주는 것은 정보 노출이 아니다. 그 기기의 Token 해시를 제시한 쪽에만
+     * 답하며, 오히려 알려주지 않으면 Agent 가 이유를 모른 채 재접속을 반복한다. (이슈 #26)
+     */
+    public Optional<DevicesRecord> findByTokenHash(String tokenHash) {
+        return dsl.selectFrom(DEVICES)
+                .where(DEVICES.DEVICE_TOKEN_HASH.eq(tokenHash))
+                .fetchOptional();
+    }
+
     // ------------------------------------------------------------------
     // 연결 상태
     // ------------------------------------------------------------------

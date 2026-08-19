@@ -166,7 +166,33 @@ class AgentWebSocketHandlerTest {
 
         handler.afterConnectionEstablished(남의_토큰);
 
+        // 해제된 기기와 구분한다. 모르는 Token 은 그대로 인증 실패다.
+        assertThat(오류코드(남의_토큰)).isEqualTo("AUTHENTICATION_FAILED");
         verify(남의_토큰).close(종료코드(4400));
+    }
+
+    @Test
+    @DisplayName("해제한 기기가 다시 붙으면 DEVICE_REVOKED 로 이유를 알린다")
+    void 해제된_기기는_이유를_알려준다() throws Exception {
+        String 해제된_TOKEN = "revoked-device-token";
+        DevicesRecord 해제된_기기 = new DevicesRecord();
+        해제된_기기.setId(99L);
+        해제된_기기.setPublicId(UUID.randomUUID());
+        해제된_기기.setStatus(DeviceStatus.REVOKED.name());
+
+        // 활성 조회는 해제된 기기를 걸러 낸다. 그래서 거부 사유를 따로 확인해야 한다.
+        when(deviceRepository.findByActiveTokenHash(eq(Sha256.hex(해제된_TOKEN)), any()))
+                .thenReturn(Optional.empty());
+        when(deviceRepository.findByTokenHash(Sha256.hex(해제된_TOKEN)))
+                .thenReturn(Optional.of(해제된_기기));
+
+        WebSocketSession 해제된_연결 = 세션(해제된_TOKEN);
+        handler.afterConnectionEstablished(해제된_연결);
+
+        // AUTHENTICATION_FAILED 를 주면 Agent 는 Token 문제로 보고 재접속을 반복한다.
+        // 등록 해제의 목적이 재연결을 영구히 막는 것이라 이 구분이 곧 기능이다. (이슈 #26)
+        assertThat(오류코드(해제된_연결)).isEqualTo("DEVICE_REVOKED");
+        verify(해제된_연결).close(종료코드(4400));
     }
 
     @Test
@@ -730,14 +756,23 @@ class AgentWebSocketHandlerTest {
 
     /** 마지막으로 소켓에 나간 프레임. */
     private JsonNode 마지막_응답() throws Exception {
+        return 마지막_응답(session);
+    }
+
+    /** 기본 세션이 아닌 연결에 나간 프레임을 볼 때 쓴다. (접속 거부 확인 등) */
+    private JsonNode 마지막_응답(WebSocketSession target) throws Exception {
         ArgumentCaptor<TextMessage> captor = ArgumentCaptor.forClass(TextMessage.class);
-        verify(session, org.mockito.Mockito.atLeastOnce()).sendMessage(captor.capture());
+        verify(target, org.mockito.Mockito.atLeastOnce()).sendMessage(captor.capture());
         List<TextMessage> sent = captor.getAllValues();
         return objectMapper.readTree(sent.get(sent.size() - 1).getPayload());
     }
 
     private String 오류코드() throws Exception {
-        JsonNode frame = 마지막_응답();
+        return 오류코드(session);
+    }
+
+    private String 오류코드(WebSocketSession target) throws Exception {
+        JsonNode frame = 마지막_응답(target);
         assertThat(frame.path("type").asText()).isEqualTo("PROTOCOL_ERROR");
         return frame.path("code").asText();
     }

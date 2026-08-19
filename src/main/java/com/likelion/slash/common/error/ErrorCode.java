@@ -28,6 +28,16 @@ public enum ErrorCode {
     /** 기기 토큰 또는 도전값 서명 검증 실패 */
     AGENT_AUTH_FAILED(HttpStatus.UNAUTHORIZED, "기기 인증에 실패했습니다."),
 
+    /**
+     * 등록이 해제된 기기.
+     *
+     * <p>{@link #FORBIDDEN} 과 나눠 두는 이유는 <b>Agent 가 이 둘에 다르게 반응해야 하기
+     * 때문</b>이다. 권한 문제라면 다시 시도할 여지가 있지만 해제는 그렇지 않다 — 재시도나
+     * 재등록을 반복할 것이 아니라 멈추고 사용자에게 알려야 한다. 같은 코드로 묶어 두면
+     * Agent 가 그것을 가릴 방법이 없다. (이슈 #26)
+     */
+    DEVICE_REVOKED(HttpStatus.FORBIDDEN, "PC 등록이 해제되었습니다. 다시 등록해 주세요."),
+
     /** 등록 코드가 틀렸거나 만료됨 */
     PAIRING_CODE_INVALID(HttpStatus.UNPROCESSABLE_ENTITY, "등록 코드가 올바르지 않거나 만료되었습니다."),
 

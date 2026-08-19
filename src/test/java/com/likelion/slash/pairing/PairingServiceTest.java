@@ -1,5 +1,6 @@
 package com.likelion.slash.pairing;
 
+import static com.likelion.slash.jooq.Tables.DEVICES;
 import static com.likelion.slash.jooq.Tables.DEVICE_PAIRING_REQUESTS;
 import static com.likelion.slash.support.TestFixtures.사용자;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -293,6 +294,27 @@ class PairingServiceTest {
                 .isInstanceOf(SlashException.class)
                 .extracting(e -> ((SlashException) e).errorCode())
                 .isEqualTo(ErrorCode.AGENT_AUTH_FAILED);
+    }
+
+    @Test
+    @DisplayName("해제한 PC 가 Token 을 갱신하려 하면 해제된 사실을 알려준다")
+    void 해제된_기기의_갱신은_사유를_알린다() throws Exception {
+        AgentPairResponse pair = 등록_시작();
+        pairingService.verify(검증_요청(pair), 클라이언트);
+
+        dsl.update(DEVICES)
+                .set(DEVICES.STATUS, DeviceStatus.REVOKED.name())
+                .set(DEVICES.REVOKED_AT, SlashTime.now())
+                .where(DEVICES.PUBLIC_ID.eq(pair.deviceId()))
+                .execute();
+
+        // 권한 문제(FORBIDDEN)와 뭉뚱그리면 Agent 가 재페어링을 시도하다 실패하고,
+        // 사용자는 왜 안 되는지 알 수 없다. 해제는 다시 시도해서 될 일이 아니다. (이슈 #26)
+        assertThatThrownBy(() ->
+                pairingService.refresh(재발급_요청(pair.deviceId(), UUID.randomUUID(), SlashTime.now())))
+                .isInstanceOf(SlashException.class)
+                .extracting(e -> ((SlashException) e).errorCode())
+                .isEqualTo(ErrorCode.DEVICE_REVOKED);
     }
 
     // ------------------------------------------------------------------

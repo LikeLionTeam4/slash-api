@@ -260,4 +260,34 @@ class DeviceRepositoryTest {
 
         assertThat(capabilityRepository.supports(deviceId, TaskType.FILE_SEARCH)).isFalse();
     }
+
+    @Test
+    @DisplayName("해제한 기기는 접속에 쓸 수 없지만 Token 해시로는 찾을 수 있다")
+    void 해제된_기기도_사유_확인용으로는_찾는다() {
+        long deviceId = 준비된_기기(dsl, 사용자(dsl));
+        String 해시 = "token-hash-" + UUID.randomUUID();
+        deviceRepository.issueToken(deviceId, 해시, SlashTime.now().plusHours(24));
+
+        dsl.update(DEVICES)
+                .set(DEVICES.STATUS, DeviceStatus.REVOKED.name())
+                .set(DEVICES.REVOKED_AT, SlashTime.now())
+                .where(DEVICES.ID.eq(deviceId))
+                .execute();
+
+        // 접속 판정에 쓰는 조회에서는 빠진다. 해제가 무력화되면 안 된다.
+        assertThat(deviceRepository.findByActiveTokenHash(해시, SlashTime.now())).isEmpty();
+
+        // 다만 거부 사유를 가리려면 행 자체는 찾을 수 있어야 한다. 그러지 못하면
+        // Agent 에게 "해제됐다"고 알려줄 수 없어 재접속을 반복한다. (이슈 #26)
+        assertThat(deviceRepository.findByTokenHash(해시))
+                .get()
+                .extracting(record -> record.getStatus())
+                .isEqualTo(DeviceStatus.REVOKED.name());
+    }
+
+    @Test
+    @DisplayName("모르는 Token 해시는 그래도 비어 있다")
+    void 모르는_토큰은_찾지_못한다() {
+        assertThat(deviceRepository.findByTokenHash("없는-해시-" + UUID.randomUUID())).isEmpty();
+    }
 }
