@@ -313,15 +313,18 @@ GET  /api/v1/tasks/{taskId}              → 200
 갈라서 읽으세요. 작업이 끝나기 전에는 `null` 입니다.
 
 > **서버는 결과를 가공하지 않습니다.** PC 실행기와 slash-llm 이 만든 것을 그대로 저장하고
-> 그대로 돌려줍니다. 그래서 이 표가 곧 그쪽 구현입니다 — 아래 형식은 실제 응답을 받아 적은
+> 그대로 돌려줍니다. 그래서 이 표가 곧 그쪽 구현입니다 — 아래 예시는 실제 응답을 받아 적은
 > 것이고, 바뀌면 이 문서도 함께 고칩니다.
+>
+> 다만 **드물게 나오는 값**(디스크를 읽지 못한 경우, 결과가 잘린 경우, 확장자 없는 파일)은
+> 재현하기 어려워 PC 실행기 코드를 근거로 적었습니다.
 
 #### `SYSTEM_STATUS`
 
 ```json
-{ "cpuPercent": 13.4, "memoryPercent": 78, "memoryTotalMb": 16384, "memoryUsedMb": 12780,
-  "diskPercent": 62, "diskTotalMb": 494384, "diskUsedMb": 266192,
-  "collectedAt": "2026-08-19T11:21:24.856+09:00" }
+{ "cpuPercent": 23.8, "memoryPercent": 68, "memoryTotalMb": 24576, "memoryUsedMb": 16663,
+  "diskPercent": 28, "diskTotalMb": 948534, "diskUsedMb": 266522,
+  "collectedAt": "2026-08-19T16:47:37.742+09:00" }
 ```
 
 **디스크 세 값은 없을 수 있습니다.** PC 실행기가 디스크 정보를 읽지 못하면 `null` 로 두는데,
