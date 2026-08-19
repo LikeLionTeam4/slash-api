@@ -39,6 +39,10 @@ import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
 import com.likelion.slash.nlu.dto.NluDecision;
 import com.likelion.slash.task.dto.CreateRequestRequest;
 import com.likelion.slash.task.dto.CreateRequestResponse;
+import com.likelion.slash.weather.WeatherClient;
+import com.likelion.slash.weather.WeatherOutcome;
+import com.likelion.slash.weather.dto.ForecastResponse;
+import com.likelion.slash.weather.dto.GeocodingResponse;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -92,6 +96,9 @@ class TaskServiceTest {
      */
     @MockitoBean
     private LlmSummaryRunner llmSummaryRunner;
+    /** 밖으로 나가는 호출이다. 계약은 WeatherClientTest 가 본다. */
+    @MockitoBean
+    private WeatherClient weatherClient;
 
     private AuthenticatedUser 사용자;
 
@@ -488,13 +495,53 @@ class TaskServiceTest {
         assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.NLU_UNAVAILABLE.name());
     }
 
-    @Test
-    @DisplayName("아직 붙이지 않은 처리 경로는 있는 척하지 않고 실패로 마감한다")
-    void 아직_없는_경로는_실패로_마감한다() {
-        NLU가(new NluAnalyzeResponse("r", NluDecision.TASK, "WEATHER_LOOKUP", Map.of("location", "서울"),
-                List.of(), null, 0.95, "SLASH"));
+    // ------------------------------------------------------------------
+    // 날씨 경로
+    // ------------------------------------------------------------------
 
-        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/weather 서울", null), null);
+    @Test
+    @DisplayName("날씨는 PC 없이 서버가 조회해 바로 마감한다")
+    void 날씨를_조회한다() {
+        날씨가(new WeatherOutcome.Success(
+                new GeocodingResponse.Place("수원시", 37.29, 127.01, "대한민국", "KR", "경기도", "Asia/Seoul"),
+                new ForecastResponse.Current("2026-08-19T11:00", 27.4, 32.7, 78, 0.0, 2, 2.6)));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/weather 수원", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.SUCCEEDED);
+
+        TasksRecord 작업 = 작업조회(응답.taskId());
+        assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.BACKEND_SERVICE.name());
+        assertThat(작업.getDeviceId()).isNull();
+
+        // 사용자가 말한 "수원" 과 실제로 조회한 곳이 다를 수 있어 찾아낸 지명을 함께 싣는다.
+        assertThat(작업.getResult().data())
+                .contains("수원시").contains("경기도")
+                .contains("27.4").contains("구름 조금");
+    }
+
+    @Test
+    @DisplayName("지역을 못 찾은 것과 서비스가 멈춘 것을 나눠 알린다")
+    void 지역을_못_찾으면_다르게_알린다() {
+        날씨가(new WeatherOutcome.Failure(ErrorCode.LOCATION_NOT_FOUND, "찾지 못했습니다."));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/weather 없는동네", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+
+        // UPSTREAM_UNAVAILABLE 로 뭉뚱그리면 사용자가 다시 말하면 된다는 것을 알 수 없다.
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.LOCATION_NOT_FOUND.name());
+    }
+
+    @Test
+    @DisplayName("날씨 서비스에 닿지 못하면 작업을 마감한다")
+    void 날씨_서비스가_멈추면_마감한다() {
+        날씨가(new WeatherOutcome.Failure(ErrorCode.UPSTREAM_UNAVAILABLE, "가져오지 못했습니다."));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/weather 서울", null), null);
 
         assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
         assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.UPSTREAM_UNAVAILABLE.name());
@@ -615,6 +662,11 @@ class TaskServiceTest {
 
         assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
         assertThat(마지막_안내(응답.taskId())).isEqualTo("요약을 맡겼습니다.");
+    }
+
+    private void 날씨가(WeatherOutcome 결과) {
+        NLU가(작업분석("WEATHER_LOOKUP", Map.of("location", "수원")));
+        given(weatherClient.lookup(any())).willReturn(결과);
     }
 
     private void NLU가(NluAnalyzeResponse 응답) {

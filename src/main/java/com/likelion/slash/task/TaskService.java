@@ -23,6 +23,9 @@ import com.likelion.slash.nlu.NluClient;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
 import com.likelion.slash.task.dto.CreateRequestRequest;
 import com.likelion.slash.task.dto.CreateRequestResponse;
+import com.likelion.slash.weather.WeatherClient;
+import com.likelion.slash.weather.WeatherCode;
+import com.likelion.slash.weather.WeatherOutcome;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -69,6 +72,9 @@ public class TaskService {
     /** TEXT_SUMMARY 의 원문. NLU 가 채운다. */
     private static final String PARAMETER_TEXT = "text";
 
+    /** WEATHER_LOOKUP 의 지명. NLU 가 채운다. */
+    private static final String PARAMETER_LOCATION = "location";
+
     /** 멱등 기록의 범위. 같은 키라도 다른 Endpoint 면 별개로 본다. */
     private static final String REQUEST_PATH = "/api/v1/requests";
 
@@ -83,6 +89,7 @@ public class TaskService {
     private final NluClient nluClient;
     private final TaskDispatcher taskDispatcher;
     private final ObjectMapper objectMapper;
+    private final WeatherClient weatherClient;
     private final LlmSummaryEnqueuer llmSummaryEnqueuer;
     private final LlmSummaryRunner llmSummaryRunner;
 
@@ -102,6 +109,7 @@ public class TaskService {
                        NluClient nluClient,
                        TaskDispatcher taskDispatcher,
                        ObjectMapper objectMapper,
+                       WeatherClient weatherClient,
                        LlmSummaryEnqueuer llmSummaryEnqueuer,
                        LlmSummaryRunner llmSummaryRunner,
                        @Value("${slash.llm.job-deadline}") Duration summaryDeadline) {
@@ -113,6 +121,7 @@ public class TaskService {
         this.nluClient = nluClient;
         this.taskDispatcher = taskDispatcher;
         this.objectMapper = objectMapper;
+        this.weatherClient = weatherClient;
         this.llmSummaryEnqueuer = llmSummaryEnqueuer;
         this.llmSummaryRunner = llmSummaryRunner;
         this.summaryDeadline = summaryDeadline;
@@ -294,10 +303,74 @@ public class TaskService {
 
         return switch (taskType.processingRoute()) {
             case LOCAL_AGENT -> routeToDevice(user, task, taskType, nlu, selectedDeviceId);
-            case BACKEND_SERVICE -> notReadyYet(task, taskType, ErrorCode.UPSTREAM_UNAVAILABLE,
-                    "날씨 조회는 아직 연결되어 있지 않습니다.");
+            case BACKEND_SERVICE -> routeToWeather(task, taskType, nlu);
             case LLM_SERVICE -> routeToLlm(task, taskType, nlu);
         };
+    }
+
+    /**
+     * 날씨를 조회한다. (Open-Meteo)
+     *
+     * <p><b>여기서 곧바로 부른다.</b> 요약과 달리 원장을 두지 않는다 — 두 번의 조회가 보통
+     * 1초 안에 끝나고, 실패해도 사용자가 다시 누르면 그만이라 남겨서 이어받을 것이 없다.
+     * ({@code async_jobs} 의 {@code ck_async_jobs_job_type} 도 LLM 작업만 허용한다)
+     *
+     * <p><b>기기를 고르지 않는다.</b> 서버가 하는 일이라 PC 가 없어도 된다.
+     *
+     * <p>지역을 못 찾은 것과 서비스가 멈춘 것을 나눈다. 앞은 사용자가 다시 말하면 되지만
+     * 뒤는 기다리는 수밖에 없어서, 같은 말로 안내하면 사용자가 할 수 있는 일을 가린다.
+     */
+    private TaskStatus routeToWeather(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
+        Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
+        String location = String.valueOf(parameters.get(PARAMETER_LOCATION));
+
+        boolean applied = stateWriter.applyAnalysisAndMove(
+                task.getId(),
+                taskType,
+                ProcessingRoute.BACKEND_SERVICE,
+                null,
+                toJsonb(parameters),
+                summarize(task.getInputText()),
+                TaskStatus.QUEUED,
+                null,
+                "날씨를 조회합니다.");
+
+        if (!applied) {
+            return currentStatusOf(task.getId());
+        }
+
+        stateWriter.move(task.getId(), TaskStatus.QUEUED, TaskStatus.RUNNING, null, "날씨를 조회하고 있습니다.");
+
+        WeatherOutcome outcome = weatherClient.lookup(location);
+        if (outcome instanceof WeatherOutcome.Failure failure) {
+            stateWriter.fail(task.getId(), TaskStatus.RUNNING, failure.errorCode(), failure.message());
+            return TaskStatus.FAILED;
+        }
+
+        WeatherOutcome.Success success = (WeatherOutcome.Success) outcome;
+        stateWriter.succeed(task.getId(), toJsonb(weatherResult(success)), "날씨를 알려 드립니다.");
+        return TaskStatus.SUCCEEDED;
+    }
+
+    /**
+     * 화면이 그대로 읽을 수 있는 모양으로 옮긴다.
+     *
+     * <p>찾아낸 지명을 함께 싣는 이유 — 사용자가 말한 "수원" 과 실제로 조회한 "수원시(경기도)"
+     * 가 다를 수 있다. 어디의 날씨인지 보여 줘야 엉뚱한 곳이면 사용자가 알아챈다.
+     */
+    private Map<String, Object> weatherResult(WeatherOutcome.Success success) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("location", success.place().name());
+        result.put("region", success.place().admin1());
+        result.put("country", success.place().country());
+        result.put("temperature", success.current().temperature());
+        result.put("apparentTemperature", success.current().apparentTemperature());
+        result.put("humidity", success.current().humidity());
+        result.put("precipitation", success.current().precipitation());
+        result.put("windSpeed", success.current().windSpeed());
+        result.put("description", WeatherCode.describe(success.current().weatherCode()));
+        result.put("observedAt", success.current().time());
+        return result;
     }
 
     /**
@@ -427,18 +500,6 @@ public class TaskService {
         return TaskStatus.QUEUED;
     }
 
-    /**
-     * 아직 붙이지 않은 처리 경로.
-     *
-     * <p>있는 척하지 않고 실패로 마감한다. 화면에는 "아직 연결되어 있지 않다"가 그대로 보인다.
-     * {@code BACKEND_SERVICE}(날씨)와 {@code LLM_SERVICE}(요약)는 종단 경로를 먼저 뚫은 뒤에
-     * 붙인다.
-     */
-    private TaskStatus notReadyYet(TasksRecord task, TaskType taskType, ErrorCode errorCode, String message) {
-        log.info("아직 연결되지 않은 처리 경로 taskId={} taskType={}", task.getPublicId(), taskType);
-        stateWriter.fail(task.getId(), TaskStatus.ANALYZING, errorCode, message);
-        return TaskStatus.FAILED;
-    }
 
     /**
      * 실행할 기기를 고른다.

@@ -26,6 +26,12 @@ import org.springframework.web.client.RestClientResponseException;
  * 자르지만, 요약은 이미 {@code QUEUED} 로 응답한 뒤 뒤에서 도는 일이라 모델이 생각할 시간을
  * 넉넉히 준다. 사용자는 그동안 화면에서 진행 상태를 본다.
  *
+ * <p><b>slash-llm 보다 먼저 끊지 않는다.</b> 먼저 끊으면 그쪽이 만들어 준 {@code MODEL_TIMEOUT}
+ * 을 받지 못해 원장에 {@code UPSTREAM_ERROR} 만 남고, 오래 걸린 것인지 닿지 못한 것인지
+ * 구분되지 않는다. 짧게 끊는다고 GPU 가 쉬지도 않는다 — slash-llm 은 Ollama 를
+ * {@code stream:false} 로 부르므로 우리가 기다리길 그만두어도 생성은 끝까지 돈다.
+ * ({@code slash.llm.timeout} 이 그쪽 {@code LLM_TIMEOUT} 보다 커야 하는 이유다 · PR #42 리뷰)
+ *
  * <p><b>자동 재시도를 하지 않는다.</b> 되돌려주는 {@link LlmFailure#retryable()} 을 원장에 남겨
  * 두면 다시 시도할지는 스윕과 나중의 SQS 정책이 정한다. 여기서 즉시 다시 부르면 모델이
  * 밀려 있을 때 부하만 늘린다.
