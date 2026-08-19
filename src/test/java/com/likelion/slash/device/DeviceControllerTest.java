@@ -20,6 +20,7 @@ import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.ws.WsMessagePublisher;
 import java.util.UUID;
 import org.hamcrest.Matchers;
+import java.util.List;
 import org.jooq.DSLContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,9 @@ class DeviceControllerTest {
     @Autowired
     private DSLContext dsl;
 
+    @Autowired
+    private DeviceSearchFolderRepository searchFolderRepository;
+
     /** 실제 Valkey 발행 대신 호출만 확인한다. 발행 자체는 W1-06 시험이 맡는다. */
     @MockitoBean
     private WsMessagePublisher wsMessagePublisher;
@@ -79,6 +83,40 @@ class DeviceControllerTest {
         mockMvc.perform(get("/api/v1/devices").header("Authorization", "Bearer alice"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.devices", Matchers.hasSize(0)));
+    }
+
+    @Test
+    @DisplayName("PC 목록에 검색 폴더를 표시 이름과 함께 싣는다")
+    void 검색_폴더를_함께_돌려준다() throws Exception {
+        long userId = 로그인한_사용자("alice");
+        long deviceId = 준비된_기기(dsl, userId);
+
+        searchFolderRepository.replaceAll(deviceId, List.of(
+                new SearchFolder("sf-work", "업무 문서", SearchFolder.INDEXED),
+                new SearchFolder("sf-photo", "사진", SearchFolder.INDEXING)));
+
+        // 파일 검색 결과에는 searchFolderId 만 온다. 화면이 그것을 사람이 읽을 이름으로
+        // 바꾸려면 이 목록이 필요하다. (이슈 #25)
+        mockMvc.perform(get("/api/v1/devices").header("Authorization", "Bearer alice"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.devices[0].searchFolders", Matchers.hasSize(2)))
+                // 이름 순이라 "사진" 이 먼저다.
+                .andExpect(jsonPath("$.data.devices[0].searchFolders[0].searchFolderId").value("sf-photo"))
+                .andExpect(jsonPath("$.data.devices[0].searchFolders[0].displayName").value("사진"))
+                .andExpect(jsonPath("$.data.devices[0].searchFolders[0].indexStatus").value("INDEXING"))
+                .andExpect(jsonPath("$.data.devices[0].searchFolders[1].displayName").value("업무 문서"));
+    }
+
+    @Test
+    @DisplayName("한 번도 연결된 적 없는 PC 는 검색 폴더가 빈 배열이다")
+    void 폴더가_없으면_빈_배열이다() throws Exception {
+        long userId = 로그인한_사용자("alice");
+        준비된_기기(dsl, userId);
+
+        // null 이 아니라 빈 배열이어야 화면이 분기 없이 그릴 수 있다.
+        mockMvc.perform(get("/api/v1/devices").header("Authorization", "Bearer alice"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.devices[0].searchFolders", Matchers.hasSize(0)));
     }
 
     @Test
@@ -278,6 +316,26 @@ class DeviceControllerTest {
                 .andExpect(jsonPath("$.data.version").value(1));
 
         verify(wsMessagePublisher, never()).sendAndClose(any(), anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("수신 설정 응답도 목록과 같은 모양이다 — 검색 폴더를 함께 준다")
+    void 수신_설정_응답에도_폴더가_온다() throws Exception {
+        long userId = 로그인한_사용자("alice");
+        long deviceId = 준비된_기기(dsl, userId);
+        searchFolderRepository.replaceAll(deviceId,
+                List.of(new SearchFolder("sf-work", "업무 문서", SearchFolder.INDEXED)));
+
+        // 화면은 이 응답으로 목록의 한 줄을 갱신한다. 여기서만 폴더가 비어 있으면
+        // 토글을 누르는 순간 그 줄의 폴더 이름이 사라진다.
+        mockMvc.perform(patch("/api/v1/devices/{id}/task-intake", 공개식별자(deviceId))
+                        .header("Authorization", "Bearer alice")
+                        .header("If-Match", "\"0\"")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accepting\": false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.searchFolders", Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.data.searchFolders[0].displayName").value("업무 문서"));
     }
 
     @Test

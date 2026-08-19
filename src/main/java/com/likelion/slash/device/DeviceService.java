@@ -10,6 +10,7 @@ import com.likelion.slash.ws.AgentProtocol;
 import com.likelion.slash.ws.WsMessagePublisher;
 import com.likelion.slash.ws.WsTarget;
 import com.likelion.slash.ws.dto.ProtocolErrorFrame;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -34,10 +35,14 @@ public class DeviceService {
     private static final Logger log = LoggerFactory.getLogger(DeviceService.class);
 
     private final DeviceRepository deviceRepository;
+    private final DeviceSearchFolderRepository searchFolderRepository;
     private final WsMessagePublisher wsMessagePublisher;
 
-    public DeviceService(DeviceRepository deviceRepository, WsMessagePublisher wsMessagePublisher) {
+    public DeviceService(DeviceRepository deviceRepository,
+                         DeviceSearchFolderRepository searchFolderRepository,
+                         WsMessagePublisher wsMessagePublisher) {
         this.deviceRepository = deviceRepository;
+        this.searchFolderRepository = searchFolderRepository;
         this.wsMessagePublisher = wsMessagePublisher;
     }
 
@@ -54,7 +59,12 @@ public class DeviceService {
      */
     @Transactional(readOnly = true)
     public DeviceListResponse findMyDevices(long userId) {
-        return DeviceListResponse.from(deviceRepository.findActiveByUserId(userId));
+        List<DevicesRecord> devices = deviceRepository.findActiveByUserId(userId);
+
+        // 검색 폴더를 함께 싣는다. 파일 검색 결과에는 searchFolderId 만 오므로, 화면이
+        // 그것을 사람이 읽을 이름으로 바꾸려면 이 목록이 필요하다. (이슈 #25)
+        return DeviceListResponse.from(devices, searchFolderRepository.findAllByDeviceIds(
+                devices.stream().map(DevicesRecord::getId).toList()));
     }
 
     /**
@@ -129,7 +139,11 @@ public class DeviceService {
         }
 
         log.info("작업 수신 {} deviceId={} userId={}", accepting ? "켬" : "끔", deviceId, userId);
-        return DeviceResponse.from(updated.get());
+
+        // 목록과 같은 모양으로 돌려준다. 같은 DTO 인데 여기서만 폴더가 비어 있으면
+        // 화면이 이 응답으로 목록의 한 줄을 갱신할 때 이름이 사라진다.
+        return DeviceResponse.from(
+                updated.get(), searchFolderRepository.findAllByDeviceId(updated.get().getId()));
     }
 
     /**

@@ -219,4 +219,38 @@ class DeviceSearchFolderRepositoryTest {
 
         assertThat(repository.pickSearchable(내_기기)).isEmpty();
     }
+
+    @Test
+    @DisplayName("여러 기기의 폴더를 한 번에 읽어 기기별로 나눠 준다")
+    void 여러_기기를_한_번에_읽는다() {
+        long 사용자_PK = 사용자(dsl);
+        long 첫_기기 = 준비된_기기(dsl, 사용자_PK);
+        long 둘째_기기 = 준비된_기기(dsl, 사용자_PK);
+        long 폴더가_없는_기기 = 준비된_기기(dsl, 사용자_PK);
+
+        // 식별자와 이름의 순서를 일부러 어긋나게 둔다. 정렬 기준이 표시 이름이라는 것을
+        // 식별자 순서로 착각하면 이 시험이 잡는다.
+        repository.replaceAll(첫_기기, List.of(
+                폴더("sf-b", "가 폴더", SearchFolder.INDEXED),
+                폴더("sf-a", "나 폴더", SearchFolder.INDEXED)));
+        repository.replaceAll(둘째_기기, List.of(폴더("sf-c", "사진", SearchFolder.INDEXING)));
+
+        var 기기별 = repository.findAllByDeviceIds(List.of(첫_기기, 둘째_기기, 폴더가_없는_기기));
+
+        assertThat(기기별.get(첫_기기))
+                .extracting(record -> record.getDisplayName())
+                .containsExactly("가 폴더", "나 폴더");
+        assertThat(기기별.get(둘째_기기))
+                .extracting(record -> record.getDisplayName())
+                .containsExactly("사진");
+
+        // 폴더가 없는 기기는 열쇠 자체가 없다. 부르는 쪽이 빈 목록으로 메운다.
+        assertThat(기기별).doesNotContainKey(폴더가_없는_기기);
+    }
+
+    @Test
+    @DisplayName("기기 목록이 비어 있으면 질의하지 않는다")
+    void 빈_목록은_그대로_돌려준다() {
+        assertThat(repository.findAllByDeviceIds(List.of())).isEmpty();
+    }
 }

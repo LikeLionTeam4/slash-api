@@ -1,7 +1,9 @@
 package com.likelion.slash.device.dto;
 
+import com.likelion.slash.jooq.tables.records.DeviceSearchFoldersRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -23,6 +25,9 @@ import java.util.UUID;
  * @param registeredAt 등록 시각
  * @param version      수정 요청의 {@code If-Match} 에 넣을 값. 그 사이 다른 탭에서 먼저 바뀌었으면
  *                     412 로 거절된다. Heartbeat 로 인한 상태 변화는 이 값을 올리지 않는다
+ * @param searchFolders 그 PC 가 검색 대상으로 등록해 둔 폴더. Agent 가 READY 로 보고한 값이며,
+ *                      한 번도 연결된 적이 없으면 비어 있다. 파일 검색 결과의
+ *                      {@code searchFolderId} 를 사람이 읽을 이름으로 바꾸는 데 쓴다 (이슈 #25)
  */
 public record DeviceResponse(
         UUID deviceId,
@@ -34,9 +39,10 @@ public record DeviceResponse(
         boolean acceptingTasks,
         OffsetDateTime lastSeenAt,
         OffsetDateTime registeredAt,
-        int version) {
+        int version,
+        List<SearchFolderResponse> searchFolders) {
 
-    public static DeviceResponse from(DevicesRecord device) {
+    public static DeviceResponse from(DevicesRecord device, List<DeviceSearchFoldersRecord> folders) {
         return new DeviceResponse(
                 device.getPublicId(),
                 device.getName(),
@@ -47,6 +53,7 @@ public record DeviceResponse(
                 Boolean.TRUE.equals(device.getAcceptingTasks()),
                 device.getLastSeenAt(),
                 device.getCreatedAt(),
-                device.getVersion());
+                device.getVersion(),
+                folders.stream().map(SearchFolderResponse::from).toList());
     }
 }

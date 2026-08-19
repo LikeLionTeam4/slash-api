@@ -6,7 +6,9 @@ import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.jooq.tables.records.DeviceSearchFoldersRecord;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.jooq.DSLContext;
 import org.jooq.impl.DSL;
 import org.springframework.stereotype.Repository;
@@ -110,5 +112,27 @@ public class DeviceSearchFolderRepository {
                 .where(DEVICE_SEARCH_FOLDERS.DEVICE_ID.eq(deviceId))
                 .orderBy(DEVICE_SEARCH_FOLDERS.DISPLAY_NAME, DEVICE_SEARCH_FOLDERS.SEARCH_FOLDER_ID)
                 .fetch();
+    }
+
+    /**
+     * 여러 기기의 검색 폴더를 한 번에 읽는다. 기기 목록 응답에 폴더를 함께 실을 때 쓴다.
+     *
+     * <p>기기마다 {@link #findAllByDeviceId} 를 부르면 목록 길이만큼 질의가 늘어난다.
+     * 지금은 사용자당 기기가 몇 대뿐이라 티가 나지 않지만, 목록 조회에 질의 수가 비례하는
+     * 구조를 두지 않는다.
+     *
+     * @return 기기 PK 별 폴더 목록. 폴더가 없는 기기는 열쇠 자체가 없다
+     */
+    public Map<Long, List<DeviceSearchFoldersRecord>> findAllByDeviceIds(Collection<Long> deviceIds) {
+        if (deviceIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return dsl.selectFrom(DEVICE_SEARCH_FOLDERS)
+                .where(DEVICE_SEARCH_FOLDERS.DEVICE_ID.in(deviceIds))
+                .orderBy(DEVICE_SEARCH_FOLDERS.DISPLAY_NAME, DEVICE_SEARCH_FOLDERS.SEARCH_FOLDER_ID)
+                .fetch()
+                .stream()
+                .collect(Collectors.groupingBy(DeviceSearchFoldersRecord::getDeviceId));
     }
 }
