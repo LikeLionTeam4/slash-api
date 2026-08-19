@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.List;
@@ -119,10 +120,19 @@ class WsSubscriptionStarterTest {
         return container;
     }
 
-    /** 중계 포트로 들어온 연결을 실제 Valkey 로 이어 준다. */
+    /**
+     * 중계 포트로 들어온 연결을 실제 Valkey 로 이어 준다.
+     *
+     * <p><b>{@code SO_REUSEADDR} 을 켜는 이유</b> — 앞 시험이 닫은 포트가 {@code TIME_WAIT} 로
+     * 남아 있으면 같은 포트를 다시 열 수 없다. macOS 는 그냥 열어 주지만 Linux 는 거절해서
+     * CI 에서만 {@code BindException} 으로 깨졌다. 시험끼리 같은 포트를 이어 쓰는 구조라
+     * 명시적으로 켠다.
+     */
     private void 중계를_연다() throws IOException {
-        중계 = new ServerSocket(중계_포트);
-        ServerSocket server = 중계;
+        ServerSocket server = new ServerSocket();
+        server.setReuseAddress(true);
+        server.bind(new InetSocketAddress("127.0.0.1", 중계_포트));
+        중계 = server;
 
         Thread accepting = new Thread(() -> {
             while (!server.isClosed()) {
