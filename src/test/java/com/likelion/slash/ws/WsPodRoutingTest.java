@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -51,7 +52,22 @@ class WsPodRoutingTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    /**
+     * Pod 간 구독을 거는 유일한 경로다. 평소에는 주기 작업이 부르지만 시험에서는 그것을 꺼 두어
+     * ({@code slash.scheduling.enabled=false} · 이슈 #31) 여기서 직접 부른다.
+     *
+     * <p>스윕과 달리 <b>상태를 바꾸는 작업이 아니라 초기화</b>라, 꺼 둔 채로 두면 구독이 영영
+     * 걸리지 않아 이 시험이 확인하려는 것 자체가 성립하지 않는다.
+     */
+    @Autowired
+    private WsSubscriptionStarter subscriptionStarter;
+
     private WebSocketSession session;
+
+    @BeforeEach
+    void 구독을_건다() {
+        subscriptionStarter.subscribeUntilConnected();
+    }
 
     @AfterEach
     void tearDown() {

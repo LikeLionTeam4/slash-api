@@ -1,10 +1,12 @@
 package com.likelion.slash.pairing;
 
+import static com.likelion.slash.jooq.Tables.DEVICE_PAIRING_REQUESTS;
 import static com.likelion.slash.support.TestFixtures.사용자;
 import static com.likelion.slash.support.TestFixtures.준비된_기기;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.likelion.slash.common.SlashTime;
+import java.time.OffsetDateTime;
 import com.likelion.slash.common.enums.PairingStatus;
 import java.util.UUID;
 import org.jooq.DSLContext;
@@ -65,9 +67,26 @@ class PairingRequestRepositoryTest {
     void 만료된_코드는_사용할_수_없다() {
         long userId = 사용자(dsl);
         String 해시 = 코드해시();
-        pairingRequestRepository.issue(userId, 해시, SlashTime.now().plusNanos(1));
+
+        // 발급한 뒤 기한을 지난 시각으로 옮긴다. 발급 시점에 곧바로 만료되는 값을 넣으면
+        // ck_pairing_expires_after_created(expires_at > created_at)에 걸린다 —
+        // created_at 의 기본값은 PostgreSQL 의 now(), 즉 트랜잭션 시작 시각이라
+        // 자바에서 계산한 시각과 순서가 뒤집힐 수 있다. 간헐 실패의 원인이었다.
+        pairingRequestRepository.issue(userId, 해시, SlashTime.now().plusMinutes(5));
+        기한을_지나게_한다(해시);
 
         assertThat(pairingRequestRepository.findUsableByCodeHash(해시)).isEmpty();
+    }
+
+    /** 발급된 코드의 생성·만료 시각을 함께 과거로 옮긴다. 제약을 지키면서 만료 상태를 만든다. */
+    private void 기한을_지나게_한다(String 코드해시) {
+        OffsetDateTime 만료 = SlashTime.now().minusMinutes(10);
+
+        dsl.update(DEVICE_PAIRING_REQUESTS)
+                .set(DEVICE_PAIRING_REQUESTS.CREATED_AT, 만료.minusMinutes(5))
+                .set(DEVICE_PAIRING_REQUESTS.EXPIRES_AT, 만료)
+                .where(DEVICE_PAIRING_REQUESTS.CODE_HASH.eq(코드해시))
+                .execute();
     }
 
     @Test
