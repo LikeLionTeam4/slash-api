@@ -118,4 +118,27 @@ public class PairingRequestRepository {
                 .and(DEVICE_PAIRING_REQUESTS.EXPIRES_AT.le(now))
                 .execute();
     }
+
+    /**
+     * 만료된 지 오래된 요청 행을 지운다. (이슈 #33)
+     *
+     * <p><b>{@link #expireOverdue} 만으로는 표가 계속 자란다.</b> 그쪽은 상태를
+     * {@code EXPIRED} 로 바꿀 뿐 행을 없애지 않는다. 등록 코드는 5분·1회용이라 시도할 때마다
+     * 행이 하나씩 남는데, 다시 볼 이유가 없는 자료다.
+     *
+     * <p><b>{@code COMPLETED} 는 남긴다.</b> {@code consumed_device_id} 로 어느 기기가 어느
+     * 코드로 등록됐는지를 가리키는 등록 이력이라, 만료된 요청과 성격이 다르다.
+     *
+     * <p>곧바로 지우지 않고 기한을 두는 이유는 없어진 행을 두고 원인을 따지게 되는 일을 막기
+     * 위해서다. 조회는 이미 {@code expires_at} 을 직접 보므로 남아 있어도 쓰이지 않는다.
+     * ({@code idempotency_records} 의 24시간 보존과 같은 판단)
+     *
+     * @param before 이 시각보다 전에 만료된 행을 지운다
+     */
+    public int deleteExpiredBefore(OffsetDateTime before) {
+        return dsl.deleteFrom(DEVICE_PAIRING_REQUESTS)
+                .where(DEVICE_PAIRING_REQUESTS.STATUS.eq(PairingStatus.EXPIRED.name()))
+                .and(DEVICE_PAIRING_REQUESTS.EXPIRES_AT.lt(before))
+                .execute();
+    }
 }
