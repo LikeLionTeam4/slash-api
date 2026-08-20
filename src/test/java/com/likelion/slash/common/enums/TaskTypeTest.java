@@ -68,13 +68,14 @@ class TaskTypeTest {
     }
 
     @Test
-    @DisplayName("P0 작업 유형은 다섯 가지다 — AI_AGENT_USAGE 가 P0-B 로 편입됐다")
+    @DisplayName("P0 작업 유형 — AI_AGENT_USAGE·FILE_OPEN 이 P0-B 로 편입됐다")
     void p0_작업_유형() {
-        // 계획 문서 §1.4 가 "Claude Code·Codex 로컬 세션 로그의 토큰 수 조회" 를 제품 본체로
-        // 옮겼다. PC 실행기는 이미 이 작업을 지원한다.
+        // 계획 문서 §1.4 가 "파일 열기와 Explorer·Finder 위치 표시" 와 "Claude Code·Codex
+        // 로컬 세션 로그의 토큰 수 조회" 를 제품 본체로 옮겼다. PC 실행기는 둘 다 이미 지원한다.
         assertThat(TaskType.p0Values()).containsExactlyInAnyOrder(
                 TaskType.WEATHER_LOOKUP,
                 TaskType.FILE_SEARCH,
+                TaskType.FILE_OPEN,
                 TaskType.SYSTEM_STATUS,
                 TaskType.TEXT_SUMMARY,
                 TaskType.AI_AGENT_USAGE);
@@ -85,6 +86,9 @@ class TaskTypeTest {
     void 필수_입력값이_계약과_일치한다() {
         assertThat(TaskType.WEATHER_LOOKUP.requiredParameters()).containsExactly("location");
         assertThat(TaskType.FILE_SEARCH.requiredParameters()).containsExactly("query", "searchFolderId");
+        // fileRef 는 FILE_SEARCH 결과가 준 값을 그대로 돌려보내는 것이다. 서버는 채우지 않는다.
+        assertThat(TaskType.FILE_OPEN.requiredParameters()).containsExactly("fileRef");
+        assertThat(TaskType.FILE_OPEN.backendProvidedParameters()).isEmpty();
         assertThat(TaskType.SYSTEM_STATUS.requiredParameters()).isEmpty();
         assertThat(TaskType.TEXT_SUMMARY.requiredParameters()).containsExactly("text");
         assertThat(TaskType.AI_AGENT_USAGE.requiredParameters()).containsExactly("provider");
