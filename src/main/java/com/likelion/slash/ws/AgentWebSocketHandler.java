@@ -10,8 +10,10 @@ import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.device.DeviceCapabilityRepository;
+import com.likelion.slash.device.DeviceProjectWorkspaceRepository;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.device.DeviceSearchFolderRepository;
+import com.likelion.slash.device.ProjectWorkspace;
 import com.likelion.slash.device.SearchFolder;
 import com.likelion.slash.dispatch.AgentDispatchRepository;
 import com.likelion.slash.jooq.tables.records.AgentDispatchesRecord;
@@ -131,6 +133,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     private final AgentSignatureVerifier signatureVerifier;
     private final DeviceRepository deviceRepository;
     private final DeviceCapabilityRepository deviceCapabilityRepository;
+    private final DeviceProjectWorkspaceRepository deviceProjectWorkspaceRepository;
     private final DeviceSearchFolderRepository deviceSearchFolderRepository;
     private final AgentDispatchRepository agentDispatchRepository;
     private final TaskService taskService;
@@ -150,6 +153,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                                  AgentSignatureVerifier signatureVerifier,
                                  DeviceRepository deviceRepository,
                                  DeviceCapabilityRepository deviceCapabilityRepository,
+                                 DeviceProjectWorkspaceRepository deviceProjectWorkspaceRepository,
                                  DeviceSearchFolderRepository deviceSearchFolderRepository,
                                  AgentDispatchRepository agentDispatchRepository,
                                  TaskService taskService,
@@ -161,6 +165,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         this.signatureVerifier = signatureVerifier;
         this.deviceRepository = deviceRepository;
         this.deviceCapabilityRepository = deviceCapabilityRepository;
+        this.deviceProjectWorkspaceRepository = deviceProjectWorkspaceRepository;
         this.deviceSearchFolderRepository = deviceSearchFolderRepository;
         this.agentDispatchRepository = agentDispatchRepository;
         this.taskService = taskService;
@@ -416,16 +421,18 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
         }
 
         List<SearchFolder> searchFolders = parseSearchFolders(frame.path("searchFolders"));
+        List<ProjectWorkspace> workspaces = parseProjectWorkspaces(frame.path("projectWorkspaces"));
 
         deviceCapabilityRepository.replaceAll(deviceId, reported);
         deviceSearchFolderRepository.replaceAll(deviceId, searchFolders);
+        deviceProjectWorkspaceRepository.replaceAll(deviceId, workspaces);
         deviceRepository.updateConnectionState(deviceId, DeviceStatus.READY);
         session.getAttributes().put(ATTR_READY_REPORTED, Boolean.TRUE);
 
-        // projectWorkspaces·maxConcurrentTasks 는 저장할 표가 없어 아직 버린다.
-        // CODE_ANALYSIS 의 workspaceId 가 searchFolderId 와 같은 자리라 P1 에서 같은 방식으로 만든다.
-        log.info("Agent READY deviceId={} 지원작업={} 검색폴더={}개 동시작업={}",
-                deviceId, reported, searchFolders.size(),
+        // maxConcurrentTasks 는 아직 쓰지 않는다. P0 는 기기당 동시 1건이고, 그 판정은
+        // agent_dispatches 의 uk_dispatch_active_device 가 한다.
+        log.info("Agent READY deviceId={} 지원작업={} 검색폴더={}개 프로젝트폴더={}개 동시작업={}",
+                deviceId, reported, searchFolders.size(), workspaces.size(),
                 frame.path("maxConcurrentTasks").asInt(0));
 
         // PC 가 꺼져 있는 동안 접수된 작업을 이제 내보낸다. (WBS W1-04)
@@ -458,6 +465,32 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
                     node.path("indexStatus").asText(null)));
         }
         return folders;
+    }
+
+    /**
+     * READY 의 {@code projectWorkspaces} 를 읽는다.
+     *
+     * <p>계약은 slash-runner 의 {@code agent.py} {@code _build_ready()} 가 원본이다.
+     * {@code searchFolders} 와 같이 <b>실제 경로는 오지 않는다.</b>
+     *
+     * <p>모양이 어긋난 항목은 {@link ProjectWorkspace#isStorable()} 이 저장 단계에서 거른다.
+     * 여기서 끊지 않는 이유는 {@code supportedTaskTypes} 와 같다 — Agent 가 새 필드를 먼저
+     * 배포해도 READY 전체가 실패하면 안 된다.
+     */
+    private List<ProjectWorkspace> parseProjectWorkspaces(JsonNode reported) {
+        List<ProjectWorkspace> workspaces = new ArrayList<>();
+        for (JsonNode node : reported) {
+            List<String> adapters = new ArrayList<>();
+            for (JsonNode adapter : node.path("availableCodeAdapters")) {
+                adapters.add(adapter.asText(null));
+            }
+            workspaces.add(new ProjectWorkspace(
+                    node.path("workspaceId").asText(null),
+                    node.path("displayName").asText(null),
+                    node.path("workspaceType").asText(null),
+                    adapters));
+        }
+        return workspaces;
     }
 
     private void handleHeartbeat(WebSocketSession session, State state, UUID eventId) throws IOException {

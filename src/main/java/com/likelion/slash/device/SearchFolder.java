@@ -57,7 +57,10 @@ public record SearchFolder(String searchFolderId, String displayName, String ind
         return searchFolderId != null && !searchFolderId.isBlank()
                 && searchFolderId.length() <= ID_MAX_LENGTH
                 && displayName != null && !displayName.isBlank()
-                && INDEX_STATUSES.contains(indexStatus);
+                // Set.of(...) 는 null 을 담을 수 없어 contains(null) 이 NPE 를 던진다.
+                // Agent 가 indexStatus 를 빠뜨린 보고를 보내면 그 예외가 READY 처리 밖으로 나가
+                // 소켓이 닫히고, Agent 는 재접속해 같은 보고를 다시 보낸다.
+                && indexStatus != null && INDEX_STATUSES.contains(indexStatus);
     }
 
     /**

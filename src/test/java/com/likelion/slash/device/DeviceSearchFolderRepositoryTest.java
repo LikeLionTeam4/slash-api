@@ -38,6 +38,22 @@ class DeviceSearchFolderRepositoryTest {
     }
 
     @Test
+    @DisplayName("색인 상태가 빠진 보고를 받아도 연결이 끊기지 않는다")
+    void 상태가_없는_보고() {
+        long 기기_PK = 준비된_기기(dsl, 사용자(dsl));
+
+        // Set.of(...).contains(null) 은 NPE 를 던진다. 그 예외가 READY 처리 밖으로 나가면
+        // 소켓이 닫히고 Agent 는 재접속해 같은 보고를 다시 보낸다 — 그 PC 는 영영 붙지 못한다.
+        repository.replaceAll(기기_PK, List.of(
+                new SearchFolder("sf-1", "문서", null),
+                폴더("sf-2", "사진", SearchFolder.INDEXED)));
+
+        assertThat(repository.findAllByDeviceId(기기_PK))
+                .extracting(record -> record.getSearchFolderId())
+                .containsExactly("sf-2");
+    }
+
+    @Test
     @DisplayName("보고한 폴더를 저장한다")
     void 저장한다() {
         long 기기_PK = 준비된_기기(dsl, 사용자(dsl));

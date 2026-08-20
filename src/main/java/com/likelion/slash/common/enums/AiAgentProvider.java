@@ -5,11 +5,14 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * {@code AI_AGENT_USAGE} 가 사용량을 물어볼 대상 도구.
+ * Slash 가 다루는 로컬 AI 도구. {@code AI_AGENT_USAGE} 의 {@code provider} 와
+ * {@code CODE_ANALYSIS} 의 코드 어댑터가 <b>같은 목록을 쓴다.</b>
  *
- * <p><b>PC 실행기의 {@code usage_adapters.py} 가 원본이다.</b> 그쪽 {@code COLLECTORS} 의 열쇠와
- * 정확히 같아야 하며, 다른 값을 보내면 실행기가 {@code INVALID_PARAMETERS} 로 거부한다.
- * 도구가 늘어나면 두 곳을 함께 고쳐야 한다.
+ * <p><b>PC 실행기가 원본이다.</b> {@code usage_adapters.py} 의 {@code COLLECTORS} 와
+ * {@code code_adapters.py} 의 {@code RUNNERS} 는 하는 일이 다르지만 열쇠가 같다 —
+ * 사용량을 읽는 것과 코드를 분석하는 것 둘 다 같은 CLI 를 쓰기 때문이다.
+ * 목록이 어긋나면 실행기가 {@code INVALID_PARAMETERS} 나
+ * {@code CODE_AGENT_NOT_CONFIGURED} 로 거부한다. 도구가 늘어나면 세 곳을 함께 고쳐야 한다.
  *
  * <p>서버가 미리 거르는 이유는 <b>PC 까지 갔다 오지 않기 위해서다.</b> 실행기가 판정하게 두면
  * PC 가 꺼져 있을 때 값이 잘못된 요청도 일단 접수되어 기다리다가, 켜진 뒤에야 실패한다.

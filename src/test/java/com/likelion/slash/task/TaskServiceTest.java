@@ -28,7 +28,9 @@ import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.common.error.SlashException;
+import com.likelion.slash.device.DeviceProjectWorkspaceRepository;
 import com.likelion.slash.device.DeviceSearchFolderRepository;
+import com.likelion.slash.device.ProjectWorkspace;
 import com.likelion.slash.device.SearchFolder;
 import com.likelion.slash.dispatch.TaskDispatcher;
 import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
@@ -81,6 +83,9 @@ class TaskServiceTest {
 
     @Autowired
     private DeviceSearchFolderRepository deviceSearchFolderRepository;
+
+    @Autowired
+    private DeviceProjectWorkspaceRepository deviceProjectWorkspaceRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -365,6 +370,77 @@ class TaskServiceTest {
     }
 
     // ------------------------------------------------------------------
+    // 코드 분석 (P0-B)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("/code 는 PC 가 보고한 프로젝트 폴더 하나를 workspaceId 로 채워 보낸다")
+    void 프로젝트폴더를_채워_보낸다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        프로젝트폴더가(deviceId, new ProjectWorkspace(
+                "ws-1", "slash-api", ProjectWorkspace.GIT_REPOSITORY, List.of("CLAUDE_CODE")));
+        NLU가(작업분석("CODE_ANALYSIS", Map.of("query", "이 프로젝트 구조 설명해줘")));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/code 이 프로젝트 구조 설명해줘", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+        // Agent 는 이 값으로 자기 폴더를 되찾는다. 서버는 경로를 모른다.
+        assertThat(파라미터(응답.taskId(), "workspaceId")).isEqualTo("ws-1");
+        assertThat(파라미터(응답.taskId(), "query")).isEqualTo("이 프로젝트 구조 설명해줘");
+    }
+
+    @Test
+    @DisplayName("무엇을 물어볼지 없으면 되묻는다 — 빈 질문으로 CLI 를 돌리지 않는다")
+    void 질문이_없으면_되묻는다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        프로젝트폴더가(deviceId, new ProjectWorkspace(
+                "ws-1", "slash-api", ProjectWorkspace.GIT_REPOSITORY, List.of("CLAUDE_CODE")));
+
+        // 실행기는 query 를 검증하지 않는다. 빈 질문으로 보내면 CLI 가 최대 300초를 쓰고
+        // 의미 없는 답을 돌려준다. 서버가 여기서 막아야 한다.
+        NLU가(new NluAnalyzeResponse("r", NluDecision.TASK, "CODE_ANALYSIS", Map.of(),
+                List.of("query"), "무엇을 분석할까요?", 1.0, "SLASH"));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/code", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.NEEDS_CLARIFICATION);
+        verify(taskDispatcher, never()).dispatch(any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("프로젝트 폴더가 없으면 WORKSPACE_NOT_FOUND 로 마감한다")
+    void 프로젝트폴더가_없으면_마감한다() {
+        준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("CODE_ANALYSIS", Map.of("query", "설명해줘")));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/code 설명해줘", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.WORKSPACE_NOT_FOUND.name());
+        verify(taskDispatcher, never()).dispatch(any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("폴더는 있는데 도구가 없으면 CODE_AGENT_NOT_CONFIGURED 로 나눠 알린다")
+    void 도구가_없으면_다르게_알린다() {
+        long deviceId = 준비된_기기(dsl, 사용자.id());
+        // 폴더는 등록했지만 Claude Code·Codex 가 설치되지 않은 PC 다.
+        프로젝트폴더가(deviceId, new ProjectWorkspace(
+                "ws-1", "slash-api", ProjectWorkspace.GIT_REPOSITORY, List.of()));
+        NLU가(작업분석("CODE_ANALYSIS", Map.of("query", "설명해줘")));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/code 설명해줘", null), null);
+
+        // 사용자가 할 일이 다르다 — 폴더를 등록하는 것이 아니라 CLI 를 설치하는 것이다.
+        // 둘 다 "폴더를 추가해 주세요" 로 안내하면 몇 번을 등록해도 같은 실패를 본다.
+        assertThat(작업조회(응답.taskId()).getErrorCode())
+                .isEqualTo(ErrorCode.CODE_AGENT_NOT_CONFIGURED.name());
+    }
+
+    // ------------------------------------------------------------------
     // 파일 열기 (P0-B)
     // ------------------------------------------------------------------
 
@@ -567,6 +643,10 @@ class TaskServiceTest {
 
     private void 검색폴더가(long deviceId, SearchFolder... folders) {
         deviceSearchFolderRepository.replaceAll(deviceId, List.of(folders));
+    }
+
+    private void 프로젝트폴더가(long deviceId, ProjectWorkspace... workspaces) {
+        deviceProjectWorkspaceRepository.replaceAll(deviceId, List.of(workspaces));
     }
 
     /** 저장된 작업 입력값에서 값 하나를 꺼낸다. 없으면 {@code null}. */

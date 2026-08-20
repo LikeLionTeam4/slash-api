@@ -172,7 +172,7 @@ public class DeviceCapabilities extends TableImpl<DeviceCapabilitiesRecord> {
     @Override
     public List<Check<DeviceCapabilitiesRecord>> getChecks() {
         return Arrays.asList(
-            Internal.createCheck(this, DSL.name("ck_device_capabilities_task_type"), "(((task_type)::text = ANY ((ARRAY['FILE_SEARCH'::character varying, 'SYSTEM_STATUS'::character varying, 'CODE_ANALYSIS'::character varying, 'AI_AGENT_USAGE'::character varying])::text[])))", true)
+            Internal.createCheck(this, DSL.name("ck_device_capabilities_task_type"), "(((task_type)::text = ANY ((ARRAY['FILE_SEARCH'::character varying, 'FILE_OPEN'::character varying, 'SYSTEM_STATUS'::character varying, 'CODE_ANALYSIS'::character varying, 'AI_AGENT_USAGE'::character varying])::text[])))", true)
         );
     }
 

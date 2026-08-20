@@ -24,6 +24,8 @@ import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.device.DeviceCapabilityRepository;
+import com.likelion.slash.device.DeviceProjectWorkspaceRepository;
+import com.likelion.slash.device.ProjectWorkspace;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.device.DeviceSearchFolderRepository;
 import com.likelion.slash.device.SearchFolder;
@@ -100,6 +102,8 @@ class AgentWebSocketHandlerTest {
 
     private final DeviceRepository deviceRepository = mock(DeviceRepository.class);
     private final DeviceCapabilityRepository deviceCapabilityRepository = mock(DeviceCapabilityRepository.class);
+    private final DeviceProjectWorkspaceRepository deviceProjectWorkspaceRepository =
+            mock(DeviceProjectWorkspaceRepository.class);
     private final DeviceSearchFolderRepository deviceSearchFolderRepository = mock(DeviceSearchFolderRepository.class);
     private final AgentDispatchRepository agentDispatchRepository = mock(AgentDispatchRepository.class);
     private final TaskService taskService = mock(TaskService.class);
@@ -112,6 +116,7 @@ class AgentWebSocketHandlerTest {
             new AgentSignatureVerifier(),
             deviceRepository,
             deviceCapabilityRepository,
+            deviceProjectWorkspaceRepository,
             deviceSearchFolderRepository,
             agentDispatchRepository,
             taskService,
@@ -411,6 +416,49 @@ class AgentWebSocketHandlerTest {
 
         // PC 가 꺼져 있는 동안 접수된 작업이 나가는 지점이 여기다. (WBS W1-04)
         verify(taskService).dispatchWaiting(기기_PK);
+    }
+
+    @Test
+    @DisplayName("READY 의 프로젝트 폴더를 계약 그대로 읽어 저장한다")
+    void 프로젝트폴더를_저장한다() throws Exception {
+        인증한다();
+
+        // slash-runner 의 agent.py _build_ready() 가 내보내는 모양 그대로다.
+        // 검색 폴더와 같이 실제 경로는 오지 않는다.
+        보낸다(프레임("READY",
+                "\"maxConcurrentTasks\":1",
+                "\"supportedTaskTypes\":[\"CODE_ANALYSIS\"]",
+                "\"searchFolders\":[]",
+                "\"projectWorkspaces\":["
+                        + "{\"workspaceId\":\"ws-1\",\"displayName\":\"slash-api\","
+                        + "\"workspaceType\":\"GIT_REPOSITORY\","
+                        + "\"availableCodeAdapters\":[\"CLAUDE_CODE\",\"CODEX\"]}]"));
+
+        ArgumentCaptor<Collection<ProjectWorkspace>> captor = ArgumentCaptor.forClass(Collection.class);
+        verify(deviceProjectWorkspaceRepository).replaceAll(eq(기기_PK), captor.capture());
+
+        assertThat(captor.getValue()).singleElement().satisfies(workspace -> {
+            assertThat(workspace.workspaceId()).isEqualTo("ws-1");
+            assertThat(workspace.displayName()).isEqualTo("slash-api");
+            assertThat(workspace.workspaceType()).isEqualTo(ProjectWorkspace.GIT_REPOSITORY);
+            assertThat(workspace.availableCodeAdapters()).containsExactly("CLAUDE_CODE", "CODEX");
+        });
+    }
+
+    @Test
+    @DisplayName("프로젝트 폴더를 보고하지 않는 Agent 도 READY 를 마친다")
+    void 프로젝트폴더가_없어도_된다() throws Exception {
+        인증한다();
+
+        // 설치된 실행기(v0.4.0)의 트레이 앱은 아직 이 필드를 채우지 않는다.
+        // 없다고 READY 를 실패시키면 그 PC 는 아무 작업도 받지 못한다.
+        보낸다(프레임("READY",
+                "\"maxConcurrentTasks\":1",
+                "\"supportedTaskTypes\":[\"FILE_SEARCH\"]",
+                "\"searchFolders\":[]"));
+
+        verify(deviceRepository).updateConnectionState(기기_PK, DeviceStatus.READY);
+        verify(deviceProjectWorkspaceRepository).replaceAll(eq(기기_PK), argThat(Collection::isEmpty));
     }
 
     @Test
