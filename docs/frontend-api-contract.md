@@ -24,6 +24,7 @@ slash-api 를 호출할 때 지켜야 하는 공통 규약입니다.
 | **동작 중** | `GET /api/v1/task-types` — 작업 유형 기준 목록 |
 | **동작 중** | `POST /api/v1/requests` — 작업 접수 |
 | **동작 중** | `GET /api/v1/tasks/{taskId}` — 작업 상태·결과 조회 |
+| **동작 중** | `GET /api/v1/tasks` — 작업 이력 목록 (갈래·상태·PC 필터) |
 | **동작 중** | `GET /api/v1/devices` — 등록된 PC 목록 |
 | **동작 중** | `DELETE /api/v1/devices/{id}` — PC 등록 해제 |
 | **동작 중** | `PATCH /api/v1/devices/{id}/task-intake` — 작업 수신 켜기·끄기 |
@@ -248,6 +249,68 @@ GET  /api/v1/tasks/{taskId}              → 200
 > 색인이 아직 도는 중인 폴더도 그대로 검색합니다. 결과가 조금 덜 나올 수는 있어도
 > 실패로 오지는 않습니다.
 
+### 이력 화면 (P0-B)
+
+```
+GET /api/v1/tasks                        → 200
+GET /api/v1/tasks?taskType=FILE_SEARCH&status=SUCCEEDED&deviceId=e0d6…&limit=20&cursor=…
+
+{ "data": { "items": [
+      { "taskId": "06c805a0-70e3-43d1-a3c0-646aecc4c219", "status": "CREATED",
+        "requestSummary": "어제 만든 그거 좀",
+        "createdAt": "2026-08-20T09:32:34.925993+09:00" },
+
+      { "taskId": "e9cf57ef-467a-4a20-8c12-e7e0a067ae74", "status": "QUEUED",
+        "taskType": "TEXT_SUMMARY", "processingRoute": "LLM_SERVICE",
+        "requestSummary": "이 글 세 줄로 요약해줘",
+        "createdAt": "2026-08-20T09:32:34.925615+09:00" },
+
+      { "taskId": "f634a7d4-7443-4319-b4e1-fd2007eb7fa4", "status": "SUCCEEDED",
+        "taskType": "WEATHER_LOOKUP", "processingRoute": "BACKEND_SERVICE",
+        "requestSummary": "오늘 서울 날씨 알려줘",
+        "createdAt": "2026-08-20T09:32:34.922341+09:00",
+        "completedAt": "2026-08-20T09:29:34.922341+09:00" }
+    ],
+    "nextCursor": "MjAyNi0wOC0yMFQwOTozMjozNC45MjU2MTUrMDk6MDB8MTI2MTc" } }
+```
+
+*(위는 실제로 받은 응답입니다. `nextCursor` 는 `limit=2` 로 불렀을 때 온 값입니다.)*
+
+**맨 위 줄처럼 `taskType` 이 없는 항목이 옵니다.** 아직 분석되지 않았거나 무슨 말인지
+알아내지 못한 요청입니다. 갈래 뱃지를 그릴 때 값이 없는 경우를 다뤄 주세요.
+
+**결과 본문(`result`)과 입력값(`parameters`)은 목록에 없습니다.** 한 건에 64KB 까지 허용되어
+스무 줄이면 응답이 1MB 를 넘길 수 있어서입니다. 한 줄을 펼칠 때
+`GET /api/v1/tasks/{taskId}` 로 그 건만 받으세요.
+
+**`requestSummary` 는 항상 있습니다.** 사용자가 입력한 원문의 앞부분(최대 80자)입니다.
+무엇을 시켰는지 알아보라고 두는 값이라 목록의 제목으로 그대로 쓰시면 됩니다.
+
+**다음 쪽은 `nextCursor` 로만 판단하세요.** 이 값이 없으면 마지막 쪽입니다. 받은 값을 다음
+요청의 `cursor` 에 그대로 넣으면 됩니다 — 안에 무엇이 들었는지는 보실 필요가 없고, 서버가
+나중에 담는 내용을 바꿔도 이 방식은 그대로입니다.
+
+> 항목 수가 `limit` 과 같은지로 판단하지 마세요. 마지막 쪽이 정확히 `limit` 개일 수 있어
+> 빈 쪽을 한 번 더 부르게 됩니다.
+
+**필터 세 가지는 모두 선택입니다.** 비우면 전체입니다.
+
+| 조건 | 값 | 비고 |
+|---|---|---|
+| `taskType` | `GET /api/v1/task-types` 가 주는 이름 | 아직 분석되지 않은 요청은 이 조건에 걸리지 않습니다 |
+| `status` | `CREATED`·`ANALYZING`·`NEEDS_CLARIFICATION`·`WAITING_FOR_DEVICE`·`QUEUED`·`RUNNING`·`SUCCEEDED`·`FAILED`·`EXPIRED` | `GET /api/v1/tasks/{taskId}` 의 `status` 와 같은 값입니다 |
+| `deviceId` | `GET /api/v1/devices` 의 `deviceId` | `/weather`·`/summary` 는 PC 를 쓰지 않아 걸리지 않습니다 |
+| `limit` | 1~100, 기본 20 | 범위를 벗어나면 `VALIDATION_ERROR` 입니다 |
+
+**모르는 이름을 넣으면 400 (`VALIDATION_ERROR`)** 으로 옵니다. 조용히 무시하지 않는 이유는,
+필터가 걸린 줄 알고 전체 목록을 보시게 되면 잘못 판단하시기 때문입니다.
+
+**해제한 PC 로 실행했던 작업도 이력에 남습니다.** 그 줄의 `deviceId` 는 그대로 오지만
+`GET /api/v1/devices` 목록에는 그 PC 가 없습니다. 이름을 찾지 못하면 "해제된 PC" 로
+보여 주세요.
+
+---
+
 **Cognito 값이 아직 없어도 로컬에서는 로그인 이후 화면을 개발할 수 있습니다.**
 [5.1 로컬 개발용 임시 인증](#51-로컬-개발용-임시-인증)을 보세요.
 
@@ -400,6 +463,10 @@ GET  /api/v1/tasks/{taskId}              → 200
   프론트에서 코드별 문구를 따로 만들지 않아도 됩니다.
 - `details` 는 없을 수 있습니다.
 - 인증 실패(401)도 같은 형식으로 옵니다. 본문 없는 401 은 나가지 않습니다.
+- **경로·질의 값의 형식이 틀리면 400 `VALIDATION_ERROR`** 입니다. UUID 자리에 UUID 가 아닌
+  값을 넣거나 `?limit=abc` 처럼 숫자 자리에 글자를 넣은 경우이고, `details` 에 문제가 된
+  이름이 들어옵니다. **비워서 보낸 질의 조건(`?deviceId=`)은 오류가 아니라 조건이 없는
+  것으로 봅니다** — 화면이 필터를 걸지 않은 채 질의 문자열을 만들어도 그대로 동작합니다.
 
 ---
 
