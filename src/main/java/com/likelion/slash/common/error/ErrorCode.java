@@ -97,6 +97,14 @@ public enum ErrorCode {
     /** 검색 폴더가 없거나 사용할 수 없음 */
     SEARCH_FOLDER_NOT_FOUND(HttpStatus.UNPROCESSABLE_ENTITY, "선택한 검색 폴더를 사용할 수 없습니다."),
 
+    /**
+     * 열려던 파일을 찾지 못함. ({@code FILE_OPEN})
+     *
+     * <p>검색 결과를 받은 뒤 파일이 옮겨지거나 지워졌을 때다. PC 실행기는 실행 직전에 다시
+     * 확인하므로, 목록에 보이던 파일도 누를 때는 없을 수 있다.
+     */
+    FILE_NOT_FOUND(HttpStatus.UNPROCESSABLE_ENTITY, "그 파일을 찾지 못했습니다. 목록을 새로 고쳐 주세요."),
+
     /** 프로젝트 작업 폴더가 없거나 사용할 수 없음 (P1) */
     WORKSPACE_NOT_FOUND(HttpStatus.UNPROCESSABLE_ENTITY, "선택한 프로젝트 폴더를 사용할 수 없습니다."),
 
@@ -153,6 +161,7 @@ public enum ErrorCode {
             TASK_TYPE_NOT_SUPPORTED,
             INVALID_PARAMETERS,
             SEARCH_FOLDER_NOT_FOUND,
+            FILE_NOT_FOUND,
             WORKSPACE_NOT_FOUND,
             CODE_AGENT_NOT_CONFIGURED,
             TASK_EXPIRED,

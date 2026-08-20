@@ -31,6 +31,22 @@ public enum TaskType {
             // (slash-nlu docs/BACKEND_CONTRACT.md · 소유권)
             List.of("searchFolderId")),
 
+    /**
+     * 검색 결과의 파일을 Finder·탐색기에서 열어 위치를 보여 준다. (P0-B)
+     *
+     * <p><b>파일을 실행하지 않는다.</b> 실행기는 그 파일이 있는 자리를 띄우기만 한다.
+     *
+     * <p>{@code fileRef} 는 {@code FILE_SEARCH} 결과가 준 값을 그대로 돌려보내는 것이다.
+     * 절대 경로는 클라우드로 오지 않으며, 그 값으로 실제 경로를 되찾는 일은 PC 가 한다.
+     * 서버는 무엇을 가리키는지 알지 못한 채 옮겨 주기만 한다.
+     */
+    FILE_OPEN(
+            "/open",
+            ProcessingRoute.LOCAL_AGENT,
+            Priority.P0,
+            List.of("fileRef"),
+            List.of()),
+
     SYSTEM_STATUS(
             "/status",
             ProcessingRoute.LOCAL_AGENT,
