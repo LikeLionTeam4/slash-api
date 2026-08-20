@@ -62,12 +62,22 @@ public enum TaskType {
             List.of("text"),
             List.of()),
 
-    /** 조건부 P1. 등록한 프로젝트 작업 폴더를 읽기 전용으로 분석한다. */
+    /**
+     * 등록한 프로젝트 작업 폴더를 Claude Code·Codex 로 <b>읽기 전용</b> 분석한다. (P0-B)
+     *
+     * <p>계획 문서 §1.4 가 제품 본체로 편입한 항목이다. 패치 적용·시험 실행·임의 코드 수정은
+     * 승인 정책이 완성되기 전에는 포함하지 않는다(같은 절).
+     *
+     * <p>{@code workspaceId} 는 Agent 가 READY 로 보고한 목록에서 서버가 고른다.
+     * {@code searchFolderId} 와 같은 이유다 — 자연어에서 뽑아낼 수 없는 값이다.
+     */
     CODE_ANALYSIS(
             "/code",
             ProcessingRoute.LOCAL_AGENT,
-            Priority.P1,
-            List.of("workspaceId"),
+            Priority.P0,
+            // 무엇을 물어볼지(query)가 없으면 CLI 가 빈 질문으로 돌다가 시간만 쓴다.
+            // 실행기도 query 를 검증하지 않으므로 여기서 필수로 둬야 NLU 가 되묻는다.
+            List.of("query", "workspaceId"),
             // 작업 폴더도 사용자가 미리 등록한 목록에서 서버가 고른다. searchFolderId 와 같은 이유다.
             List.of("workspaceId")),
 

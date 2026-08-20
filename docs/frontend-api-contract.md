@@ -210,8 +210,17 @@ GET  /api/v1/tasks/{taskId}              → 200
 > 서버가 맞춰 주지만, `claude` 처럼 목록에 없는 말은 `INVALID_PARAMETERS` (422) 로 거절합니다.
 > PC 까지 갔다 오지 않고 접수 시점에 바로 답하므로, PC 가 꺼져 있어도 즉시 알 수 있습니다.
 
-**`/open` (파일 열기)은 서버와 PC 실행기가 준비됐습니다.** 다만 NLU 가 아직 이 명령을 알지
-못해, 붙기 전까지는 `UNRECOGNIZED_COMMAND` 로 옵니다.
+**`/open` (파일 열기)·`/usage` (AI 도구 사용량)·`/code` (코드 분석)는 서버와 PC 실행기가
+준비됐습니다.** 다만 NLU 가 아직 이 세 명령을 알지 못해, 붙기 전까지는
+`UNRECOGNIZED_COMMAND` 로 옵니다.
+
+> **`/code` 는 분석할 폴더를 프론트가 고르지 않습니다.** `/file` 과 같습니다 — 사용자가 PC 의
+> Agent 에 등록해 둔 프로젝트 폴더 중에서 **서버가 자동으로 고릅니다.** 요청에 넣을 값이 없고,
+> `/code 이 프로젝트 구조 설명해줘` 처럼 물어볼 말만 보내면 됩니다.
+>
+> 폴더가 없으면 `WORKSPACE_NOT_FOUND`, 폴더는 있는데 CLI 가 없으면
+> `CODE_AGENT_NOT_CONFIGURED` 로 갈라져 옵니다. **둘을 같은 문구로 안내하지 마세요** —
+> 앞은 폴더를 등록하면 풀리지만 뒤는 몇 번을 등록해도 풀리지 않습니다.
 
 > **사용자가 직접 치는 명령이 아닙니다.** `/file` 결과 카드의 "위치 보기" 같은 버튼에서
 > 화면이 대신 보내는 것을 전제로 만들었습니다. 결과 항목의 `fileRef` 를 그대로 실어
@@ -475,6 +484,31 @@ GET /api/v1/tasks?taskType=FILE_SEARCH&status=SUCCEEDED&deviceId=e0d6…&limit=2
 
 `model` 은 어떤 모델이 만든 요약인지 남긴 값이라 화면에 보여 줄 필요는 없습니다.
 
+#### `CODE_ANALYSIS`
+
+```json
+{ "codeAdapter": "CLAUDE_CODE", "summary": "이 프로젝트는 Spring Boot 기반의 …",
+  "turns": 3, "durationMs": 24817,
+  "collectedAt": "2026-08-20T15:12:44.201+09:00" }
+```
+
+PC 실행기가 그 폴더에서 Claude Code 또는 Codex CLI 를 **읽기 전용**으로 돌린 결과입니다.
+파일을 고치거나 명령을 실행하지 않습니다.
+
+- `summary` 가 본문입니다. CLI 가 낸 답을 그대로 담습니다
+- `codeAdapter` 는 실제로 쓰인 도구입니다. 서버가 고르지 않고 **그 PC 가 쓸 수 있는 것 중에서
+  실행기가 정합니다.** 요청 때는 알 수 없으니 결과를 받고 나서 보여 주세요
+- `turns` 는 CLI 가 주고받은 횟수입니다. 값을 못 읽으면 `null` 로 옵니다
+- **오래 걸립니다.** 실측 24초였고 최대 300초까지 갑니다. 진행 중에는 실행기가 15초마다
+  진행 상황을 보내므로 화면이 멈춘 것처럼 보이지는 않습니다
+
+> 결과가 길면 실행기가 미리 잘라서 보냅니다. `tasks.result` 의 64KB 상한에 맞추기 위해서입니다.
+
+> **위 예시는 실제 응답이 아닙니다.** 필드 이름과 구조는 PC 실행기의 `code_adapters.py` 를
+> 근거로 적었고 **값은 지어낸 것입니다.** 종단으로 받아 보지 못한 이유는 두 가지입니다 —
+> NLU 가 아직 `/code` 를 모르고, **설치된 실행기가 프로젝트 폴더를 아직 보고하지 않습니다**
+> (트레이 앱이 `projectWorkspaces` 를 채우지 않습니다). 실제로 받아 보면 실측값으로 바꾸겠습니다.
+
 #### `AI_AGENT_USAGE`
 
 ```json
@@ -569,8 +603,8 @@ Gemma 의 추론량과는 무관합니다.
 | `UNRECOGNIZED_COMMAND` | 422 | **무슨 요청인지 알아내지 못함.** 다시 입력 유도 |
 | `SEARCH_FOLDER_NOT_FOUND` | 422 | 검색 폴더 재선택 |
 | `FILE_NOT_FOUND` | 422 | **열려던 파일이 없습니다.** 그 사이 옮겨졌거나 지워진 것이라, 목록을 다시 불러 주세요 |
-| `WORKSPACE_NOT_FOUND` | 422 | P1 |
-| `CODE_AGENT_NOT_CONFIGURED` | 422 | P1 |
+| `WORKSPACE_NOT_FOUND` | 422 | **분석할 프로젝트 폴더가 없습니다.** PC 의 Agent 에서 폴더를 등록하도록 안내해 주세요 |
+| `CODE_AGENT_NOT_CONFIGURED` | 422 | **그 PC 에 Claude Code·Codex 가 없습니다.** 폴더를 더 등록해도 풀리지 않으니 설치를 안내해 주세요 |
 | `POLICY_DENIED` | 403 | 허용되지 않은 경로 또는 작업 |
 | `AGENT_REJECTED` | 422 | PC 가 작업을 받지 않음. 사유를 알 수 없을 때 옵니다 |
 | `AGENT_TASK_FAILED` | 422 | PC 에서 실행이 끝나지 못함. 사유를 알 수 없을 때 옵니다 |

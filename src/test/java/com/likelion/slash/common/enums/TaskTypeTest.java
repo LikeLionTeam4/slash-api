@@ -68,17 +68,11 @@ class TaskTypeTest {
     }
 
     @Test
-    @DisplayName("P0 작업 유형 — AI_AGENT_USAGE·FILE_OPEN 이 P0-B 로 편입됐다")
+    @DisplayName("이제 모든 작업 유형이 P0 다 — P0-B 편입이 끝났다")
     void p0_작업_유형() {
-        // 계획 문서 §1.4 가 "파일 열기와 Explorer·Finder 위치 표시" 와 "Claude Code·Codex
-        // 로컬 세션 로그의 토큰 수 조회" 를 제품 본체로 옮겼다. PC 실행기는 둘 다 이미 지원한다.
-        assertThat(TaskType.p0Values()).containsExactlyInAnyOrder(
-                TaskType.WEATHER_LOOKUP,
-                TaskType.FILE_SEARCH,
-                TaskType.FILE_OPEN,
-                TaskType.SYSTEM_STATUS,
-                TaskType.TEXT_SUMMARY,
-                TaskType.AI_AGENT_USAGE);
+        // 계획 문서 §1.4 가 파일 열기·사용량 조회·코드 분석을 제품 본체(P0-B)로 옮기면서
+        // P1 로 남은 유형이 없어졌다. Priority 는 자동화(새 P1)가 들어올 때 다시 쓰인다.
+        assertThat(TaskType.p0Values()).containsExactlyInAnyOrder(TaskType.values());
     }
 
     @Test
@@ -92,6 +86,7 @@ class TaskTypeTest {
         assertThat(TaskType.SYSTEM_STATUS.requiredParameters()).isEmpty();
         assertThat(TaskType.TEXT_SUMMARY.requiredParameters()).containsExactly("text");
         assertThat(TaskType.AI_AGENT_USAGE.requiredParameters()).containsExactly("provider");
+        assertThat(TaskType.CODE_ANALYSIS.requiredParameters()).containsExactly("query", "workspaceId");
     }
 
     @Test
@@ -103,8 +98,12 @@ class TaskTypeTest {
         assertThat(TaskType.FILE_SEARCH.backendProvidedParameters()).containsExactly("searchFolderId");
         assertThat(TaskType.FILE_SEARCH.nluRequiredParameters()).containsExactly("query");
 
+        // CODE_ANALYSIS 는 폴더(workspaceId)만 서버가 채우고, 무엇을 물어볼지(query)는 NLU 몫이다.
+        // 예전에는 query 가 필수 목록에 없어 이 값이 비어 있었다. 그러면 되묻지 않고 그대로
+        // 실행되는데, 실행기는 query 를 그대로 `claude -p "<query>"` 의 프롬프트로 쓴다.
+        // 빈 질문으로 CLI 를 돌리면 최대 300초를 쓰고 쓸모없는 답이 온다.
         assertThat(TaskType.CODE_ANALYSIS.backendProvidedParameters()).containsExactly("workspaceId");
-        assertThat(TaskType.CODE_ANALYSIS.nluRequiredParameters()).isEmpty();
+        assertThat(TaskType.CODE_ANALYSIS.nluRequiredParameters()).containsExactly("query");
     }
 
     @Test

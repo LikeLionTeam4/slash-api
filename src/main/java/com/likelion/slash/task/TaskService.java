@@ -11,6 +11,7 @@ import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.common.error.SlashException;
+import com.likelion.slash.device.DeviceProjectWorkspaceRepository;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.device.DeviceSearchFolderRepository;
 import com.likelion.slash.dispatch.TaskDispatcher;
@@ -77,6 +78,9 @@ public class TaskService {
     /** AI_AGENT_USAGE 의 대상 도구. NLU 가 채운다. */
     private static final String PARAMETER_PROVIDER = "provider";
 
+    /** CODE_ANALYSIS 의 분석 대상 폴더. Agent 가 READY 로 보고한 것 중 서버가 고른다. */
+    private static final String PARAMETER_WORKSPACE_ID = "workspaceId";
+
     /** 멱등 기록의 범위. 같은 키라도 다른 Endpoint 면 별개로 본다. */
     private static final String REQUEST_PATH = "/api/v1/requests";
 
@@ -88,6 +92,7 @@ public class TaskService {
     private final IdempotencyRecordRepository idempotencyRecordRepository;
     private final DeviceRepository deviceRepository;
     private final DeviceSearchFolderRepository deviceSearchFolderRepository;
+    private final DeviceProjectWorkspaceRepository deviceProjectWorkspaceRepository;
     private final NluClient nluClient;
     private final TaskDispatcher taskDispatcher;
     private final ObjectMapper objectMapper;
@@ -109,6 +114,7 @@ public class TaskService {
                        IdempotencyRecordRepository idempotencyRecordRepository,
                        DeviceRepository deviceRepository,
                        DeviceSearchFolderRepository deviceSearchFolderRepository,
+                       DeviceProjectWorkspaceRepository deviceProjectWorkspaceRepository,
                        NluClient nluClient,
                        TaskDispatcher taskDispatcher,
                        ObjectMapper objectMapper,
@@ -122,6 +128,7 @@ public class TaskService {
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.deviceRepository = deviceRepository;
         this.deviceSearchFolderRepository = deviceSearchFolderRepository;
+        this.deviceProjectWorkspaceRepository = deviceProjectWorkspaceRepository;
         this.nluClient = nluClient;
         this.taskDispatcher = taskDispatcher;
         this.objectMapper = objectMapper;
@@ -701,9 +708,9 @@ public class TaskService {
      * 그 경우 Agent 가 {@code SEARCH_FOLDER_NOT_FOUND} 로 거절하므로 조용히 틀리지는 않는다.
      * 전달 시점으로 미루려면 이미 저장된 작업 입력값을 다시 써야 해서 지금은 접수 시점에 고른다.
      *
-     * <p><b>지금 채우는 것은 {@code searchFolderId} 하나뿐이다.</b> CODE_ANALYSIS 의
-     * {@code workspaceId} 도 같은 자리(P1)인데 저장할 표가 없어 채우지 못한다. 그 경우 값 없이
-     * 나가고 Agent 가 {@code WORKSPACE_NOT_FOUND} 로 거절한다. 표가 생기면 여기에 한 줄 더 붙는다.
+     * <p>채우는 값은 둘이다 — {@code FILE_SEARCH} 의 {@code searchFolderId} 와
+     * {@code CODE_ANALYSIS} 의 {@code workspaceId}. 둘 다 Agent 가 READY 로 보고한 목록에서
+     * 고르며, 고르지 못하면 작업을 여기서 마감한다. 값 없이 내보내 봐야 Agent 가 거절한다.
      *
      * @return 채웠으면 참. 거짓이면 채우지 못해 작업을 이미 실패로 마감했다
      */
@@ -712,10 +719,21 @@ public class TaskService {
                                         DevicesRecord device,
                                         Map<String, Object> parameters) {
 
-        if (!taskType.backendProvidedParameters().contains(PARAMETER_SEARCH_FOLDER_ID)) {
-            return true;
-        }
+        List<String> needed = taskType.backendProvidedParameters();
 
+        if (needed.contains(PARAMETER_SEARCH_FOLDER_ID)
+                && !fillSearchFolder(task, device, parameters)) {
+            return false;
+        }
+        if (needed.contains(PARAMETER_WORKSPACE_ID)
+                && !fillProjectWorkspace(task, device, parameters)) {
+            return false;
+        }
+        return true;
+    }
+
+    /** {@code FILE_SEARCH} 가 뒤질 폴더를 고른다. */
+    private boolean fillSearchFolder(TasksRecord task, DevicesRecord device, Map<String, Object> parameters) {
         Optional<String> searchFolderId = deviceSearchFolderRepository.pickSearchable(device.getId());
         if (searchFolderId.isEmpty()) {
             // 폴더를 한 번도 보고받지 못했거나, 있어도 전부 읽을 수 없는(UNAVAILABLE) 상태다.
@@ -729,6 +747,36 @@ public class TaskService {
 
         parameters.put(PARAMETER_SEARCH_FOLDER_ID, searchFolderId.get());
         return true;
+    }
+
+    /**
+     * {@code CODE_ANALYSIS} 가 분석할 프로젝트 폴더를 고른다.
+     *
+     * <p><b>폴더가 없는 것과 도구가 없는 것을 나눠 알린다.</b> 사용자가 할 일이 다르기 때문이다 —
+     * 앞은 Agent 에서 폴더를 등록하는 것이고, 뒤는 Claude Code 나 Codex 를 설치하는 것이다.
+     * 둘 다 "폴더를 추가해 주세요" 로 안내하면, CLI 를 안 깔아 둔 사용자는 폴더를 몇 번을
+     * 등록해도 같은 실패를 본다.
+     */
+    private boolean fillProjectWorkspace(TasksRecord task, DevicesRecord device, Map<String, Object> parameters) {
+        Optional<String> workspaceId = deviceProjectWorkspaceRepository.pickAnalyzable(device.getId());
+        if (workspaceId.isPresent()) {
+            parameters.put(PARAMETER_WORKSPACE_ID, workspaceId.get());
+            return true;
+        }
+
+        boolean hasAnyFolder = !deviceProjectWorkspaceRepository.findAllByDeviceId(device.getId()).isEmpty();
+        if (hasAnyFolder) {
+            log.debug("프로젝트 폴더는 있으나 쓸 수 있는 도구가 없다 taskId={} deviceId={}",
+                    task.getPublicId(), device.getId());
+            stateWriter.fail(task.getId(), TaskStatus.ANALYZING, ErrorCode.CODE_AGENT_NOT_CONFIGURED,
+                    "PC 에 Claude Code 나 Codex 가 설치되어 있지 않습니다.");
+            return false;
+        }
+
+        log.debug("분석할 프로젝트 폴더가 없다 taskId={} deviceId={}", task.getPublicId(), device.getId());
+        stateWriter.fail(task.getId(), TaskStatus.ANALYZING, ErrorCode.WORKSPACE_NOT_FOUND,
+                "PC 에 분석할 프로젝트 폴더가 없습니다. Agent 에서 폴더를 추가해 주세요.");
+        return false;
     }
 
     private JSONB toJsonb(Map<String, Object> parameters) {
