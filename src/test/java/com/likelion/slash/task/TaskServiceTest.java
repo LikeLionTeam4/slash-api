@@ -365,6 +365,39 @@ class TaskServiceTest {
     }
 
     // ------------------------------------------------------------------
+    // 파일 열기 (P0-B)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("/open 은 파일 표식을 그대로 PC 로 보낸다")
+    void 파일_열기를_PC_로_보낸다() {
+        준비된_기기(dsl, 사용자.id());
+        // fileRef 는 FILE_SEARCH 결과가 준 값이다. 서버는 무엇을 가리키는지 알지 못한 채 옮긴다.
+        NLU가(작업분석("FILE_OPEN", Map.of("fileRef", "f62dfe8a-8525-4ba9-a0b5-7f6d70ebfedd")));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/open f62dfe8a-8525-4ba9-a0b5-7f6d70ebfedd", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+        assertThat(작업조회(응답.taskId()).getProcessingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT.name());
+        assertThat(파라미터(응답.taskId(), "fileRef")).isEqualTo("f62dfe8a-8525-4ba9-a0b5-7f6d70ebfedd");
+    }
+
+    @Test
+    @DisplayName("/open 은 검색 폴더를 채우지 않는다 — 파일 표식만으로 찾는다")
+    void 파일_열기에는_검색폴더가_필요없다() {
+        준비된_기기(dsl, 사용자.id());
+        // 검색 폴더를 보고받지 않은 기기여도 FILE_SEARCH 와 달리 막히지 않아야 한다.
+        NLU가(작업분석("FILE_OPEN", Map.of("fileRef", "f62dfe8a-8525-4ba9-a0b5-7f6d70ebfedd")));
+
+        CreateRequestResponse 응답 = taskService.accept(
+                사용자, new CreateRequestRequest("/open f62dfe8a-8525-4ba9-a0b5-7f6d70ebfedd", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isNull();
+    }
+
+    // ------------------------------------------------------------------
     // 검색 폴더 (WBS W1-03)
     // ------------------------------------------------------------------
 
