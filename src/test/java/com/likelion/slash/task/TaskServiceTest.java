@@ -311,6 +311,60 @@ class TaskServiceTest {
     }
 
     // ------------------------------------------------------------------
+    // AI 도구 사용량 (P0-B)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("/usage 는 PC 로 보내고 도구 이름을 그대로 싣는다")
+    void 사용량을_PC_로_보낸다() {
+        준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("AI_AGENT_USAGE", Map.of("provider", "CLAUDE_CODE")));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/usage claude", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
+        assertThat(작업조회(응답.taskId()).getProcessingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT.name());
+        assertThat(파라미터(응답.taskId(), "provider")).isEqualTo("CLAUDE_CODE");
+    }
+
+    @Test
+    @DisplayName("도구 이름의 대소문자·이음표는 실행기가 아는 형태로 맞춰 보낸다")
+    void 도구_이름을_맞춰_보낸다() {
+        준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("AI_AGENT_USAGE", Map.of("provider", "claude-code")));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/usage claude", null), null);
+
+        // 실행기의 COLLECTORS 는 정확한 이름만 받는다. 대소문자만 달라도 INVALID_PARAMETERS 다.
+        assertThat(파라미터(응답.taskId(), "provider")).isEqualTo("CLAUDE_CODE");
+    }
+
+    @Test
+    @DisplayName("모르는 도구는 PC 로 보내지 않고 INVALID_PARAMETERS 로 마감한다")
+    void 모르는_도구는_보내지_않는다() {
+        준비된_기기(dsl, 사용자.id());
+        NLU가(작업분석("AI_AGENT_USAGE", Map.of("provider", "gpt")));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/usage gpt", null), null);
+
+        assertThat(응답.status()).isEqualTo(TaskStatus.FAILED);
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.INVALID_PARAMETERS.name());
+        verify(taskDispatcher, never()).dispatch(any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("PC 가 없어도 입력값이 잘못된 것을 먼저 알린다")
+    void 입력값_오류를_기기보다_먼저_알린다() {
+        // 기기를 등록하지 않았다. 기기를 먼저 보면 DEVICE_NOT_READY 가 나가서, 실제 원인이
+        // 입력값이라는 것을 사용자가 알 수 없다.
+        NLU가(작업분석("AI_AGENT_USAGE", Map.of("provider", "gpt")));
+
+        CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/usage gpt", null), null);
+
+        assertThat(작업조회(응답.taskId()).getErrorCode()).isEqualTo(ErrorCode.INVALID_PARAMETERS.name());
+    }
+
+    // ------------------------------------------------------------------
     // 검색 폴더 (WBS W1-03)
     // ------------------------------------------------------------------
 
