@@ -12,6 +12,7 @@ import com.likelion.slash.jooq.tables.records.TasksRecord;
 import com.likelion.slash.task.dto.CreateRequestRequest;
 import com.likelion.slash.task.dto.CreateRequestResponse;
 import com.likelion.slash.task.dto.TaskDetailResponse;
+import com.likelion.slash.task.dto.TaskHistoryResponse;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -44,17 +46,20 @@ public class RequestController {
 
     private final AuthenticatedUserService authenticatedUserService;
     private final TaskService taskService;
+    private final TaskHistoryService taskHistoryService;
     private final TaskEventRepository taskEventRepository;
     private final DeviceRepository deviceRepository;
     private final ObjectMapper objectMapper;
 
     public RequestController(AuthenticatedUserService authenticatedUserService,
                              TaskService taskService,
+                             TaskHistoryService taskHistoryService,
                              TaskEventRepository taskEventRepository,
                              DeviceRepository deviceRepository,
                              ObjectMapper objectMapper) {
         this.authenticatedUserService = authenticatedUserService;
         this.taskService = taskService;
+        this.taskHistoryService = taskHistoryService;
         this.taskEventRepository = taskEventRepository;
         this.deviceRepository = deviceRepository;
         this.objectMapper = objectMapper;
@@ -83,6 +88,29 @@ public class RequestController {
         return ResponseEntity.accepted()
                 .header("Location", accepted.statusUrl())
                 .body(ApiResponse.of(accepted));
+    }
+
+    /**
+     * 내 작업 이력. (P0-B)
+     *
+     * <p>최신순이고 커서로 이어 받는다. 갈래·상태·PC 로 좁힐 수 있으며, 셋 다 비우면 전체다.
+     *
+     * <p><b>결과 본문은 담기지 않는다.</b> 한 건을 펼쳐 볼 때 {@code GET /tasks/{taskId}} 를 부른다.
+     *
+     * @param cursor 이전 응답의 {@code nextCursor} 를 그대로 넘긴다. 첫 쪽이면 비운다
+     */
+    @GetMapping("/tasks")
+    public ApiResponse<TaskHistoryResponse> history(
+            @RequestParam(required = false) String taskType,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) UUID deviceId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer limit) {
+
+        AuthenticatedUser user = authenticatedUserService.current();
+
+        return ApiResponse.of(taskHistoryService.find(
+                user.id(), taskType, status, deviceId, cursor, limit));
     }
 
     /** 작업 하나의 현재 상태와 결과. 남의 작업은 404 다. */

@@ -1,5 +1,6 @@
 package com.likelion.slash.task;
 
+import static com.likelion.slash.support.TestFixtures.분석된_작업;
 import static com.likelion.slash.support.TestFixtures.사용자;
 import static com.likelion.slash.support.TestFixtures.작업;
 import static com.likelion.slash.support.TestFixtures.준비된_기기;
@@ -206,14 +207,65 @@ class TaskRepositoryTest {
         var 두번째 = taskRepository.create(userId, "요청 2", null);
         var 세번째 = taskRepository.create(userId, "요청 3", null);
 
-        var 첫쪽 = taskRepository.findRecent(userId, null, null, 2);
+        var 첫쪽 = taskRepository.findRecent(userId, TaskHistoryFilter.NONE, null, 2);
         assertThat(첫쪽).extracting(record -> record.getId())
                 .containsExactly(세번째.getId(), 두번째.getId());
 
         var 마지막 = 첫쪽.get(첫쪽.size() - 1);
-        var 다음쪽 = taskRepository.findRecent(userId, 마지막.getCreatedAt(), 마지막.getId(), 2);
+        var 다음쪽 = taskRepository.findRecent(
+                userId, TaskHistoryFilter.NONE, new HistoryCursor(마지막.getCreatedAt(), 마지막.getId()), 2);
         assertThat(다음쪽).extracting(record -> record.getId())
                 .containsExactly(첫번째.getId());
+    }
+
+    @Test
+    @DisplayName("이력을 갈래·상태·PC 로 좁힌다")
+    void 이력_필터() {
+        long userId = 사용자(dsl);
+        long 기기 = 준비된_기기(dsl, userId);
+        long 다른_기기 = 준비된_기기(dsl, userId);
+
+        long 날씨 = 분석된_작업(dsl, userId, null, TaskStatus.SUCCEEDED.name(),
+                TaskType.WEATHER_LOOKUP, "오늘 서울 날씨");
+        long 검색_성공 = 분석된_작업(dsl, userId, 기기, TaskStatus.SUCCEEDED.name(),
+                TaskType.FILE_SEARCH, "회의록 찾아줘");
+        long 검색_실행중 = 분석된_작업(dsl, userId, 다른_기기, TaskStatus.RUNNING.name(),
+                TaskType.FILE_SEARCH, "예산안 찾아줘");
+
+        assertThat(taskRepository.findRecent(userId,
+                new TaskHistoryFilter(TaskType.FILE_SEARCH, null, null), null, 20))
+                .extracting(record -> record.getId())
+                .containsExactly(검색_실행중, 검색_성공);
+
+        assertThat(taskRepository.findRecent(userId,
+                new TaskHistoryFilter(null, TaskStatus.SUCCEEDED, null), null, 20))
+                .extracting(record -> record.getId())
+                .containsExactly(검색_성공, 날씨);
+
+        assertThat(taskRepository.findRecent(userId,
+                new TaskHistoryFilter(null, null, 기기), null, 20))
+                .extracting(record -> record.getId())
+                .containsExactly(검색_성공);
+
+        // 조건을 겹치면 모두 만족하는 것만 남는다
+        assertThat(taskRepository.findRecent(userId,
+                new TaskHistoryFilter(TaskType.FILE_SEARCH, TaskStatus.SUCCEEDED, 다른_기기), null, 20))
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("갈래로 좁히면 아직 분석되지 않은 요청은 걸리지 않는다")
+    void 분석_전_작업은_갈래_필터에_걸리지_않는다() {
+        long userId = 사용자(dsl);
+        taskRepository.create(userId, "아직 분석 전", null);
+        long 날씨 = 분석된_작업(dsl, userId, null, TaskStatus.SUCCEEDED.name(),
+                TaskType.WEATHER_LOOKUP, "오늘 서울 날씨");
+
+        assertThat(taskRepository.findRecent(userId, TaskHistoryFilter.NONE, null, 20)).hasSize(2);
+        assertThat(taskRepository.findRecent(userId,
+                new TaskHistoryFilter(TaskType.WEATHER_LOOKUP, null, null), null, 20))
+                .extracting(record -> record.getId())
+                .containsExactly(날씨);
     }
 
     @Test
@@ -224,7 +276,7 @@ class TaskRepositoryTest {
         taskRepository.create(남, "남의 요청", null);
         var 내_작업 = taskRepository.create(나, "내 요청", null);
 
-        assertThat(taskRepository.findRecent(나, null, null, 20))
+        assertThat(taskRepository.findRecent(나, TaskHistoryFilter.NONE, null, 20))
                 .extracting(record -> record.getId())
                 .containsExactly(내_작업.getId());
     }

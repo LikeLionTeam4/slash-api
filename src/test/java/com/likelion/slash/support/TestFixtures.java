@@ -4,7 +4,10 @@ import static com.likelion.slash.jooq.Tables.DEVICES;
 import static com.likelion.slash.jooq.Tables.TASKS;
 import static com.likelion.slash.jooq.Tables.USERS;
 
+import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.DeviceStatus;
+import com.likelion.slash.common.enums.TaskStatus;
+import com.likelion.slash.common.enums.TaskType;
 import java.util.UUID;
 import org.jooq.DSLContext;
 
@@ -20,8 +23,16 @@ public final class TestFixtures {
     }
 
     public static long 사용자(DSLContext dsl) {
+        return 사용자(dsl, "sub-" + UUID.randomUUID());
+    }
+
+    /**
+     * 지정한 {@code sub} 의 사용자. 임시 인증에서는 {@code Authorization} 의 문자열이 곧 이 값이라,
+     * MockMvc 로 부를 사용자를 미리 만들어 두어야 할 때 쓴다.
+     */
+    public static long 사용자(DSLContext dsl, String cognitoSub) {
         return dsl.insertInto(USERS)
-                .set(USERS.COGNITO_SUB, "sub-" + UUID.randomUUID())
+                .set(USERS.COGNITO_SUB, cognitoSub)
                 .set(USERS.EMAIL, UUID.randomUUID() + "@example.com")
                 .returning(USERS.ID)
                 .fetchOne()
@@ -56,5 +67,35 @@ public final class TestFixtures {
                 .returning(TASKS.ID)
                 .fetchOne()
                 .getId();
+    }
+
+    /**
+     * 분석까지 끝난 작업. 이력 필터처럼 작업 유형이 있어야 하는 시험에 쓴다.
+     *
+     * <p>{@code applyAnalysis} 는 {@code ANALYZING} 에서만 듣기 때문에 상태를 거치지 않고 바로 넣는다.
+     */
+    public static long 분석된_작업(DSLContext dsl,
+                              long userId,
+                              Long deviceId,
+                              String status,
+                              TaskType taskType,
+                              String inputText) {
+        return dsl.insertInto(TASKS)
+                .set(TASKS.USER_ID, userId)
+                .set(TASKS.DEVICE_ID, deviceId)
+                .set(TASKS.INPUT_TEXT, inputText)
+                .set(TASKS.REQUEST_SUMMARY, inputText)
+                .set(TASKS.TASK_TYPE, taskType.name())
+                .set(TASKS.PROCESSING_ROUTE, taskType.processingRoute().name())
+                .set(TASKS.STATUS, status)
+                // ck_tasks_completed_at — 끝난 작업에는 완료 시각이 반드시 있어야 한다
+                .set(TASKS.COMPLETED_AT, 끝난_상태(status) ? SlashTime.now() : null)
+                .returning(TASKS.ID)
+                .fetchOne()
+                .getId();
+    }
+
+    private static boolean 끝난_상태(String status) {
+        return TaskStatus.valueOf(status).isTerminal();
     }
 }

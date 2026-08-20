@@ -64,9 +64,6 @@ public class TaskService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskService.class);
 
-    /** 이력 목록에 보여줄 요약 길이. */
-    private static final int SUMMARY_LENGTH = 80;
-
     /** FILE_SEARCH 의 서버가 채우는 입력값. Agent 가 READY 로 보고한 폴더 중 하나를 넣는다. */
     private static final String PARAMETER_SEARCH_FOLDER_ID = "searchFolderId";
 
@@ -705,8 +702,7 @@ public class TaskService {
     }
 
     private String summarize(String text) {
-        String trimmed = text.trim();
-        return trimmed.length() <= SUMMARY_LENGTH ? trimmed : trimmed.substring(0, SUMMARY_LENGTH);
+        return RequestSummary.of(text);
     }
 
     private TaskStatus currentStatusOf(long taskId) {

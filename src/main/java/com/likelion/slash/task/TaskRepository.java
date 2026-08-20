@@ -94,25 +94,53 @@ public class TaskRepository {
      * 최근 이력을 커서 방식으로 읽는다. ({@code idx_tasks_user_created})
      *
      * <p>OFFSET 을 쓰지 않으므로 목록을 넘기는 동안 새 작업이 생겨도 항목이 밀리거나 겹치지 않는다.
-     * 다음 쪽을 요청할 때는 마지막 행의 {@code created_at} 과 {@code id} 를 그대로 넘긴다.
+     * 다음 쪽을 요청할 때는 마지막 행이 가리키는 {@link HistoryCursor} 를 그대로 넘긴다.
      *
-     * @param cursorCreatedAt 첫 쪽이면 {@code null}
-     * @param cursorId        첫 쪽이면 {@code null}
+     * <p><b>정렬과 커서 비교가 같은 짝이어야 한다.</b> {@code (created_at, id)} 를 하나의 행 값으로
+     * 비교하므로, 같은 시각에 접수된 작업이 여럿이어도 건너뛰거나 겹치지 않는다.
+     *
+     * @param filter 좁힐 조건. 없으면 {@link TaskHistoryFilter#NONE}
+     * @param cursor 첫 쪽이면 {@code null}
      */
     public List<TasksRecord> findRecent(long userId,
-                                        OffsetDateTime cursorCreatedAt,
-                                        Long cursorId,
+                                        TaskHistoryFilter filter,
+                                        HistoryCursor cursor,
                                         int limit) {
-        Condition afterCursor = (cursorCreatedAt == null || cursorId == null)
+        Condition afterCursor = (cursor == null)
                 ? DSL.noCondition()
-                : DSL.row(TASKS.CREATED_AT, TASKS.ID).lt(cursorCreatedAt, cursorId);
+                : DSL.row(TASKS.CREATED_AT, TASKS.ID).lt(cursor.createdAt(), cursor.id());
 
         return dsl.selectFrom(TASKS)
                 .where(TASKS.USER_ID.eq(userId))
                 .and(afterCursor)
+                .and(matching(filter))
                 .orderBy(TASKS.CREATED_AT.desc(), TASKS.ID.desc())
                 .limit(limit)
                 .fetch();
+    }
+
+    /**
+     * 비워 둔 조건은 빼고 나머지만 {@code AND} 로 묶는다.
+     *
+     * <p>분석 전이라 {@code task_type} 이 아직 없는 작업은 유형으로 좁히면 걸리지 않는다.
+     * 갈래를 고른 사용자가 아직 갈래가 정해지지 않은 요청까지 보는 편이 오히려 어색하다.
+     */
+    private Condition matching(TaskHistoryFilter filter) {
+        if (filter == null) {
+            return DSL.noCondition();
+        }
+
+        Condition condition = DSL.noCondition();
+        if (filter.taskType() != null) {
+            condition = condition.and(TASKS.TASK_TYPE.eq(filter.taskType().name()));
+        }
+        if (filter.status() != null) {
+            condition = condition.and(TASKS.STATUS.eq(filter.status().name()));
+        }
+        if (filter.deviceId() != null) {
+            condition = condition.and(TASKS.DEVICE_ID.eq(filter.deviceId()));
+        }
+        return condition;
     }
 
     /**
