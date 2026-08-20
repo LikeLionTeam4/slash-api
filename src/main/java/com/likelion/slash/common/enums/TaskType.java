@@ -55,11 +55,19 @@ public enum TaskType {
             // 작업 폴더도 사용자가 미리 등록한 목록에서 서버가 고른다. searchFolderId 와 같은 이유다.
             List.of("workspaceId")),
 
-    /** P1. Claude·Codex SDK 의 사용량 조회. 자체 호스팅 Gemma 추론량과 무관하다. */
+    /**
+     * Claude·Codex CLI 의 로컬 세션 로그에서 토큰 사용량을 읽는다. 자체 호스팅 Gemma 추론량과
+     * 무관하다.
+     *
+     * <p>계획 문서 §1.4 가 P0-B(제품 본체)로 편입한 항목이라 P0 로 둔다.
+     *
+     * <p>{@code provider} 는 {@link AiAgentProvider} 의 값이어야 한다. PC 실행기가 그 목록
+     * 밖의 값을 거부하므로 서버가 먼저 확인한다.
+     */
     AI_AGENT_USAGE(
             "/usage",
             ProcessingRoute.LOCAL_AGENT,
-            Priority.P1,
+            Priority.P0,
             List.of("provider"),
             List.of());
 

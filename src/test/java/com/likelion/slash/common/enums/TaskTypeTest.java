@@ -68,13 +68,16 @@ class TaskTypeTest {
     }
 
     @Test
-    @DisplayName("P0 작업 유형은 네 가지다")
-    void p0_작업_유형은_네_가지다() {
+    @DisplayName("P0 작업 유형은 다섯 가지다 — AI_AGENT_USAGE 가 P0-B 로 편입됐다")
+    void p0_작업_유형() {
+        // 계획 문서 §1.4 가 "Claude Code·Codex 로컬 세션 로그의 토큰 수 조회" 를 제품 본체로
+        // 옮겼다. PC 실행기는 이미 이 작업을 지원한다.
         assertThat(TaskType.p0Values()).containsExactlyInAnyOrder(
                 TaskType.WEATHER_LOOKUP,
                 TaskType.FILE_SEARCH,
                 TaskType.SYSTEM_STATUS,
-                TaskType.TEXT_SUMMARY);
+                TaskType.TEXT_SUMMARY,
+                TaskType.AI_AGENT_USAGE);
     }
 
     @Test

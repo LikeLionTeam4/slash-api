@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.auth.AuthenticatedUser;
 import com.likelion.slash.common.Sha256;
 import com.likelion.slash.common.SlashTime;
+import com.likelion.slash.common.enums.AiAgentProvider;
 import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
@@ -72,6 +73,9 @@ public class TaskService {
 
     /** WEATHER_LOOKUP 의 지명. NLU 가 채운다. */
     private static final String PARAMETER_LOCATION = "location";
+
+    /** AI_AGENT_USAGE 의 대상 도구. NLU 가 채운다. */
+    private static final String PARAMETER_PROVIDER = "provider";
 
     /** 멱등 기록의 범위. 같은 키라도 다른 Endpoint 면 별개로 본다. */
     private static final String REQUEST_PATH = "/api/v1/requests";
@@ -387,6 +391,14 @@ public class TaskService {
                                      NluAnalyzeResponse nlu,
                                      UUID selectedDeviceId) {
 
+        Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
+
+        // 입력값부터 본다. 기기를 먼저 고르면 PC 가 없을 때 DEVICE_NOT_READY 가 나가서,
+        // 실제 원인이 입력값이라는 것을 사용자가 알 수 없다.
+        if (!validateAgentParameters(task, taskType, parameters)) {
+            return TaskStatus.FAILED;
+        }
+
         Optional<DevicesRecord> found = resolveDevice(user, selectedDeviceId);
         if (found.isEmpty()) {
             stateWriter.fail(task.getId(), TaskStatus.ANALYZING, ErrorCode.DEVICE_NOT_READY,
@@ -405,8 +417,6 @@ public class TaskService {
                     "선택한 PC 가 다른 작업을 실행 중입니다.");
             return TaskStatus.FAILED;
         }
-
-        Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
 
         // NLU 가 채우지 않는 값을 서버가 채운다. 채우지 못하면 실행할 수 없으므로 여기서 마감한다.
         if (!fillBackendProvided(task, taskType, device, parameters)) {
@@ -647,6 +657,37 @@ public class TaskService {
         } catch (IllegalArgumentException e) {
             return Optional.empty();
         }
+    }
+
+    /**
+     * NLU 가 채운 값이 PC 실행기의 계약에 맞는지 본다.
+     *
+     * <p><b>여기서 거르지 않으면 PC 까지 갔다 온 뒤에야 실패한다.</b> 실행기는 모르는 값을
+     * {@code INVALID_PARAMETERS} 로 거부하는데, PC 가 꺼져 있으면 그 판정조차 켜질 때까지
+     * 미뤄진다. 값이 잘못된 것은 지금 알 수 있는 일이라 지금 답한다.
+     *
+     * <p>값이 맞으면 실행기가 쓰는 정확한 이름으로 맞춰 둔다. 대소문자만 달라도 거부당한다.
+     */
+    private boolean validateAgentParameters(TasksRecord task,
+                                            TaskType taskType,
+                                            Map<String, Object> parameters) {
+
+        if (taskType != TaskType.AI_AGENT_USAGE) {
+            return true;
+        }
+
+        Object raw = parameters.get(PARAMETER_PROVIDER);
+        Optional<AiAgentProvider> provider = AiAgentProvider.from(raw == null ? null : String.valueOf(raw));
+
+        if (provider.isEmpty()) {
+            log.debug("사용량을 볼 도구를 알 수 없다 taskId={} provider={}", task.getPublicId(), raw);
+            stateWriter.fail(task.getId(), TaskStatus.ANALYZING, ErrorCode.INVALID_PARAMETERS,
+                    "어떤 도구의 사용량을 볼지 알 수 없습니다. Claude Code 또는 Codex 중에서 골라 주세요.");
+            return false;
+        }
+
+        parameters.put(PARAMETER_PROVIDER, provider.get().name());
+        return true;
     }
 
     /**

@@ -203,6 +203,13 @@ GET  /api/v1/tasks/{taskId}              → 200
 `/status` (시스템 상태)·`/file` (파일 검색)·`/weather` (날씨)·`/summary` (요약)가
 **모두 종단까지 동작합니다.** P0 네 가지가 다 붙었습니다.
 
+**`/usage` (AI 도구 사용량)는 서버와 PC 실행기가 준비됐습니다.** 다만 NLU 가 아직 이 명령을
+알지 못해, 붙기 전까지는 `UNRECOGNIZED_COMMAND` 로 옵니다.
+
+> **`provider` 는 `CLAUDE_CODE` 또는 `CODEX` 여야 합니다.** 대소문자와 이음표(`claude-code`)는
+> 서버가 맞춰 주지만, `claude` 처럼 목록에 없는 말은 `INVALID_PARAMETERS` (422) 로 거절합니다.
+> PC 까지 갔다 오지 않고 접수 시점에 바로 답하므로, PC 가 꺼져 있어도 즉시 알 수 있습니다.
+
 > **`/weather` 는 PC 를 고르지 않습니다.** 서버가 조회하는 일이라 등록된 PC 가 없어도
 > 실행되고, `selectedDeviceId` 를 보내도 무시합니다.
 >
@@ -439,6 +446,38 @@ GET /api/v1/tasks?taskType=FILE_SEARCH&status=SUCCEEDED&deviceId=e0d6…&limit=2
 ```
 
 `model` 은 어떤 모델이 만든 요약인지 남긴 값이라 화면에 보여 줄 필요는 없습니다.
+
+#### `AI_AGENT_USAGE`
+
+```json
+{ "provider": "CLAUDE_CODE", "totalSessions": 36,
+  "totalInputTokens": 105075, "totalOutputTokens": 10351006,
+  "totalCachedTokens": 2692975528, "totalReasoningTokens": null,
+  "totalTokens": 2703431609,
+  "oldestSessionAt": "2026-05-18T11:33:29.464Z",
+  "newestSessionAt": "2026-08-20T02:29:55.029Z",
+  "collectedAt": "2026-08-20T11:30:11.666+09:00" }
+```
+
+PC 실행기가 Claude Code·Codex 의 **로컬 세션 로그**를 읽어 집계한 값입니다. 자체 호스팅
+Gemma 의 추론량과는 무관합니다.
+
+**여기 두 가지는 다른 응답과 다릅니다. 실제로 받아 확인한 것입니다.**
+
+- **`totalReasoningTokens` 는 값이 없어도 빠지지 않고 `null` 로 옵니다.** §2 의 "`null` 인 필드는
+  응답에서 빠집니다" 규칙은 서버가 만드는 필드에만 적용되는데, `result` 는 PC 실행기가 만든
+  것을 서버가 그대로 통과시키기 때문입니다. Claude Code 는 `null`, Codex 는 숫자입니다
+- **`oldestSessionAt`·`newestSessionAt` 은 UTC(`Z`)로 옵니다.** §2 의 "모든 시각은 한국
+  시각(`+09:00`)" 규칙의 예외입니다. 로그 파일에 적힌 값을 그대로 싣기 때문입니다.
+  같은 응답 안의 `collectedAt` 은 한국 시각이라 **한 응답에 두 표기가 섞입니다**
+
+그 밖에 알아 두실 것:
+
+- 원격에서 돈 세션(웹 등)은 그 PC 에 로그가 남지 않아 집계에 잡히지 않습니다
+- 그 도구를 쓴 적이 없으면 `CODE_AGENT_NOT_CONFIGURED` (422) 로 옵니다
+- 세션 수는 세었는데 토큰이 모두 `0` 으로 오는 경우가 있습니다. 실제로 Codex 에서 그런
+  응답을 받았습니다(`totalSessions: 27`, 토큰 전부 `0`). 화면에서 0 을 그대로 보여 주면
+  사용자가 오해할 수 있으니, 세션이 있는데 토큰이 0 이면 따로 안내해 주시는 편이 좋습니다
 
 ---
 
