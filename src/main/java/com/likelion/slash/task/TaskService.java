@@ -1,10 +1,15 @@
 package com.likelion.slash.task;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.likelion.slash.approval.ApprovalPolicy;
+import com.likelion.slash.approval.TaskApprovalRepository;
+import com.likelion.slash.approval.TaskApprovalService;
 import com.likelion.slash.auth.AuthenticatedUser;
 import com.likelion.slash.common.Sha256;
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AiAgentProvider;
+import com.likelion.slash.common.enums.ApprovalDecision;
 import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.ExecutionTarget;
 import com.likelion.slash.common.enums.SummaryEngine;
@@ -19,6 +24,7 @@ import com.likelion.slash.dispatch.TaskDispatcher;
 import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
 import com.likelion.slash.jooq.tables.records.IdempotencyRecordsRecord;
+import com.likelion.slash.jooq.tables.records.TaskApprovalsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
 import com.likelion.slash.llm.LlmReadiness;
 import com.likelion.slash.llm.LlmSummaryEnqueuer;
@@ -110,6 +116,9 @@ public class TaskService {
     private final LlmSummaryEnqueuer llmSummaryEnqueuer;
     private final LlmSummaryRunner llmSummaryRunner;
     private final NluSummaryClient nluSummaryClient;
+    private final ApprovalPolicy approvalPolicy;
+    private final TaskApprovalService approvalService;
+    private final TaskApprovalRepository approvalRepository;
 
     /** 요약을 무엇으로 할지. 실행할 때 고르는 값이라 설정으로 둔다. (slash-docs#3) */
     private final SummaryEngine summaryEngine;
@@ -136,6 +145,9 @@ public class TaskService {
                        LlmSummaryEnqueuer llmSummaryEnqueuer,
                        LlmSummaryRunner llmSummaryRunner,
                        NluSummaryClient nluSummaryClient,
+                       ApprovalPolicy approvalPolicy,
+                       TaskApprovalService approvalService,
+                       TaskApprovalRepository approvalRepository,
                        @Value("${slash.summary.engine}") SummaryEngine summaryEngine,
                        @Value("${slash.llm.job-deadline}") Duration summaryDeadline) {
         this.taskRepository = taskRepository;
@@ -146,6 +158,9 @@ public class TaskService {
         this.deviceProjectWorkspaceRepository = deviceProjectWorkspaceRepository;
         this.nluClient = nluClient;
         this.nluSummaryClient = nluSummaryClient;
+        this.approvalPolicy = approvalPolicy;
+        this.approvalService = approvalService;
+        this.approvalRepository = approvalRepository;
         this.summaryEngine = summaryEngine;
         this.taskDispatcher = taskDispatcher;
         this.objectMapper = objectMapper;
@@ -401,6 +416,11 @@ public class TaskService {
     private TaskStatus routeToExtractiveSummary(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
         Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
 
+        Optional<TaskStatus> paused = pauseForApproval(task, taskType, ExecutionTarget.BACKEND, null, parameters);
+        if (paused.isPresent()) {
+            return paused.get();
+        }
+
         boolean applied = stateWriter.applyAnalysisAndMove(
                 task.getId(),
                 taskType,
@@ -416,6 +436,11 @@ public class TaskService {
             return currentStatusOf(task.getId());
         }
 
+        return executeExtractiveSummary(task, parameters);
+    }
+
+    /** 요약을 실제로 하고 마감한다. 접수 직후와 승인 뒤가 이 자리를 함께 쓴다. */
+    private TaskStatus executeExtractiveSummary(TasksRecord task, Map<String, Object> parameters) {
         stateWriter.move(task.getId(), TaskStatus.QUEUED, TaskStatus.RUNNING, null, "요약하고 있습니다.");
 
         SummaryOutcome outcome = nluSummaryClient.summarize(
@@ -455,6 +480,161 @@ public class TaskService {
     }
 
     /**
+     * 실행 직전에 사용자 확인이 필요한지 보고, 필요하면 그 자리에서 멈춘다.
+     * (P0-C · 계획 문서 §1.5)
+     *
+     * <p><b>준비를 마친 뒤에 부른다.</b> 기기를 고르고 입력값까지 다 채운 다음이라야 사용자가
+     * 본 것과 실행되는 것이 같아진다. 먼저 물어 놓고 값을 나중에 채우면 무엇을 승인한 것인지
+     * 아무도 말할 수 없다.
+     *
+     * @return 멈췄으면 그 상태. 비어 있으면 승인이 필요 없으니 그대로 진행한다
+     */
+    private Optional<TaskStatus> pauseForApproval(TasksRecord task,
+                                                  TaskType taskType,
+                                                  ExecutionTarget target,
+                                                  Long deviceId,
+                                                  Map<String, Object> parameters) {
+
+        if (!approvalPolicy.requiresApproval(taskType)) {
+            return Optional.empty();
+        }
+
+        boolean applied = stateWriter.applyAnalysisAndMove(
+                task.getId(),
+                taskType,
+                target,
+                deviceId,
+                toJsonb(parameters),
+                summarize(task.getInputText()),
+                TaskStatus.WAITING_FOR_APPROVAL,
+                null,
+                "실행하기 전에 확인이 필요합니다.");
+
+        if (!applied) {
+            return Optional.of(currentStatusOf(task.getId()));
+        }
+
+        approvalService.request(task.getId(), parameters);
+        log.info("승인을 기다린다 taskId={} taskType={}", task.getPublicId(), taskType);
+        return Optional.of(TaskStatus.WAITING_FOR_APPROVAL);
+    }
+
+    /** 작업에 걸린 승인 요청. 없으면 비어 있다. */
+    public Optional<TaskApprovalsRecord> findApproval(long taskId) {
+        return approvalRepository.findByTaskId(taskId);
+    }
+
+    /**
+     * 사용자의 결정을 받아 처리한다. (P0-C · 계획 문서 §1.5)
+     *
+     * <p>승인이면 그 자리에서 실행으로 이어지고, 거절이면 아무것도 실행하지 않고 마감한다.
+     *
+     * <p><b>결정과 실행을 한 트랜잭션으로 묶지 않는다.</b> 실행은 PC 전달이나 외부 호출을
+     * 포함해 수 초가 걸리는데, 그동안 승인 행을 잠그고 있으면 같은 사용자의 다른 요청까지
+     * 밀린다. 결정이 먼저 커밋되고 실행이 뒤따르는 편이, 실행 도중 Pod 이 내려가도
+     * "승인은 했는데 실행이 시작되지 않은" 상태로 남아 스윕이 마감할 수 있다.
+     */
+    public TaskStatus decideApproval(AuthenticatedUser user,
+                                     TasksRecord task,
+                                     ApprovalDecision decision,
+                                     int expectedVersion) {
+
+        approvalService.decide(user, task, decision, expectedVersion);
+
+        if (decision == ApprovalDecision.REJECT) {
+            stateWriter.fail(task.getId(), TaskStatus.WAITING_FOR_APPROVAL,
+                    ErrorCode.APPROVAL_REJECTED, "실행하지 않았습니다.");
+            return TaskStatus.FAILED;
+        }
+
+        return resumeAfterApproval(task);
+    }
+
+    /**
+     * 승인받은 작업을 이어서 실행한다. (P0-C)
+     *
+     * <p><b>승인한 내용과 지금 실행하려는 내용이 같은지 먼저 확인한다.</b> 다르면 실행하지
+     * 않는다 — 사용자가 본 것과 다른 것이 실행되면 승인은 뜻을 잃는다. 지금 구조에서는 그
+     * 사이에 입력값이 바뀔 길이 없지만, 확인을 두지 않으면 나중에 바뀔 수 있게 만드는 순간
+     * 아무도 알아채지 못한다.
+     *
+     * <p>기기와 입력값은 승인 전에 이미 정해 두었으므로 <b>다시 고르지 않는다.</b> 다시 고르면
+     * 사용자가 승인한 PC 가 아닌 곳에서 실행될 수 있다.
+     */
+    public TaskStatus resumeAfterApproval(TasksRecord task) {
+        TaskType taskType = TaskType.valueOf(task.getTaskType());
+        Map<String, Object> parameters = readParameters(task);
+
+        TaskApprovalsRecord approval = approvalRepository.findByTaskId(task.getId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "승인 기록 없이 재개할 수 없습니다. taskId=" + task.getPublicId()));
+
+        if (!approvalService.matches(approval, parameters)) {
+            log.error("승인한 내용과 실행하려는 내용이 다르다 taskId={}", task.getPublicId());
+            stateWriter.fail(task.getId(), TaskStatus.WAITING_FOR_APPROVAL,
+                    ErrorCode.INVALID_PARAMETERS, "승인한 내용과 달라져 실행하지 않았습니다.");
+            return TaskStatus.FAILED;
+        }
+
+        return switch (resolveExecutionTarget(taskType)) {
+            case RUNNER -> resumeOnDevice(task);
+            case BACKEND -> resumeOnBackend(task, taskType, parameters);
+            case BROWSER -> throw new IllegalStateException(
+                    "브라우저 실행은 아직 접수하지 않는다. taskType=" + taskType);
+        };
+    }
+
+    /**
+     * 승인받은 PC 작업을 보낸다.
+     *
+     * <p>기기는 승인 전에 정해져 있다. <b>그 사이에 꺼졌을 수 있으므로</b> 지금 받을 수 있는지
+     * 다시 본다 — 받을 수 없으면 접수 때와 같이 {@code WAITING_FOR_DEVICE} 로 기다린다.
+     */
+    private TaskStatus resumeOnDevice(TasksRecord task) {
+        Optional<DevicesRecord> device = deviceRepository.findById(task.getDeviceId());
+        boolean ready = device.isPresent() && acceptsTask(device.get());
+
+        TaskStatus next = ready ? TaskStatus.QUEUED : TaskStatus.WAITING_FOR_DEVICE;
+        String message = ready
+                ? "PC 로 작업을 보냈습니다."
+                : device.map(TaskService::waitingMessage).orElse("PC 가 연결되면 실행합니다.");
+
+        if (!stateWriter.move(task.getId(), TaskStatus.WAITING_FOR_APPROVAL, next, null, message)) {
+            return currentStatusOf(task.getId());
+        }
+
+        return ready ? dispatchOrRelease(task.getId()) : next;
+    }
+
+    /** 승인받은 서버 작업을 실행한다. 접수 직후와 같은 자리를 쓴다. */
+    private TaskStatus resumeOnBackend(TasksRecord task, TaskType taskType, Map<String, Object> parameters) {
+        if (!stateWriter.move(task.getId(), TaskStatus.WAITING_FOR_APPROVAL, TaskStatus.QUEUED,
+                null, "승인을 받아 실행합니다.")) {
+            return currentStatusOf(task.getId());
+        }
+
+        return switch (taskType) {
+            case WEATHER_LOOKUP -> executeWeather(task, parameters);
+            case TEXT_SUMMARY -> executeExtractiveSummary(task, parameters);
+            default -> throw new IllegalStateException(
+                    "서버가 실행할 방법을 모르는 작업이다. taskType=" + taskType);
+        };
+    }
+
+    /** 저장해 둔 입력값을 읽는다. 승인 전에 굳혀 둔 것과 같은 값이어야 한다. */
+    private Map<String, Object> readParameters(TasksRecord task) {
+        JSONB parameters = task.getParameters();
+        if (parameters == null) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(parameters.data(), new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            throw new IllegalStateException("저장된 입력값을 읽을 수 없습니다. taskId=" + task.getPublicId(), e);
+        }
+    }
+
+    /**
      * 날씨를 조회한다. (Open-Meteo)
      *
      * <p><b>여기서 곧바로 부른다.</b> 요약과 달리 원장을 두지 않는다 — 두 번의 조회가 보통
@@ -468,7 +648,11 @@ public class TaskService {
      */
     private TaskStatus routeToWeather(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
         Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
-        String location = String.valueOf(parameters.get(PARAMETER_LOCATION));
+
+        Optional<TaskStatus> paused = pauseForApproval(task, taskType, ExecutionTarget.BACKEND, null, parameters);
+        if (paused.isPresent()) {
+            return paused.get();
+        }
 
         boolean applied = stateWriter.applyAnalysisAndMove(
                 task.getId(),
@@ -484,6 +668,17 @@ public class TaskService {
         if (!applied) {
             return currentStatusOf(task.getId());
         }
+
+        return executeWeather(task, parameters);
+    }
+
+    /**
+     * 날씨를 실제로 조회하고 마감한다. 접수 직후와 승인 뒤가 이 자리를 함께 쓴다.
+     *
+     * <p>{@code QUEUED} 에서 시작하는 것이 전제다.
+     */
+    private TaskStatus executeWeather(TasksRecord task, Map<String, Object> parameters) {
+        String location = String.valueOf(parameters.get(PARAMETER_LOCATION));
 
         stateWriter.move(task.getId(), TaskStatus.QUEUED, TaskStatus.RUNNING, null, "날씨를 조회하고 있습니다.");
 
@@ -564,6 +759,14 @@ public class TaskService {
             return TaskStatus.FAILED;
         }
 
+        // 기기와 입력값이 모두 정해진 지금이 물어볼 자리다. 이보다 앞이면 무엇을 승인하는지
+        // 알 수 없고, 이보다 뒤면 이미 PC 로 나간 뒤다.
+        Optional<TaskStatus> paused = pauseForApproval(
+                task, taskType, ExecutionTarget.RUNNER, device.getId(), parameters);
+        if (paused.isPresent()) {
+            return paused.get();
+        }
+
         boolean ready = acceptsTask(device);
         TaskStatus next = ready ? TaskStatus.QUEUED : TaskStatus.WAITING_FOR_DEVICE;
         String message = ready ? "PC 로 작업을 보냈습니다." : waitingMessage(device);
@@ -641,6 +844,12 @@ public class TaskService {
         }
 
         Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
+
+        Optional<TaskStatus> paused = pauseForApproval(task, taskType, ExecutionTarget.BACKEND, null, parameters);
+        if (paused.isPresent()) {
+            return paused.get();
+        }
+
         JSONB input = toJsonb(parameters);
 
         Optional<AsyncJobsRecord> job = llmSummaryEnqueuer.enqueue(

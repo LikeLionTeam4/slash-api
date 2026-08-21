@@ -6,6 +6,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -60,6 +61,27 @@ public class GlobalExceptionHandler {
                 .status(code.httpStatus())
                 .body(ErrorResponse.of(code, code.defaultMessage(),
                         Map.of(e.getName(), "형식이 올바르지 않습니다.")));
+    }
+
+    /**
+     * 요청 본문을 읽지 못했다. (깨진 JSON·목록에 없는 열거값·형식이 다른 값)
+     *
+     * <p><b>사용자가 고칠 수 있는 오류인데 500 으로 나가고 있었다.</b> 이 예외를 다루지
+     * 않아 아래 {@code Exception} 핸들러로 떨어졌고, 프론트는 "잠시 후 다시 시도" 로
+     * 안내하게 된다 — 몇 번을 다시 보내도 같은 본문이면 결과가 같다.
+     *
+     * <p><b>예외 메시지를 그대로 내보내지 않는다.</b> Jackson 의 메시지에는 클래스 이름과
+     * 필드 경로가 그대로 들어 있어 내부 구조가 밖으로 샌다. 어떤 값이 문제인지는 서버
+     * 로그가 들고 있다.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadableBody(HttpMessageNotReadableException e) {
+        ErrorCode code = ErrorCode.VALIDATION_ERROR;
+        log.info("요청 본문을 읽지 못했다: {}", e.getMostSpecificCause().getMessage());
+
+        return ResponseEntity
+                .status(code.httpStatus())
+                .body(ErrorResponse.of(code, code.defaultMessage()));
     }
 
     @ExceptionHandler(Exception.class)

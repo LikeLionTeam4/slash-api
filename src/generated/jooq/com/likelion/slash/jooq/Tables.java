@@ -14,6 +14,7 @@ import com.likelion.slash.jooq.tables.DeviceSearchFolders;
 import com.likelion.slash.jooq.tables.Devices;
 import com.likelion.slash.jooq.tables.IdempotencyRecords;
 import com.likelion.slash.jooq.tables.OutboxEvents;
+import com.likelion.slash.jooq.tables.TaskApprovals;
 import com.likelion.slash.jooq.tables.TaskEvents;
 import com.likelion.slash.jooq.tables.Tasks;
 import com.likelion.slash.jooq.tables.Users;
@@ -74,6 +75,11 @@ public class Tables {
      * DB 저장과 SQS 발행 사이의 유실 방지. published_at IS NULL 만 전달 대상이다.
      */
     public static final OutboxEvents OUTBOX_EVENTS = OutboxEvents.OUTBOX_EVENTS;
+
+    /**
+     * The table <code>public.task_approvals</code>.
+     */
+    public static final TaskApprovals TASK_APPROVALS = TaskApprovals.TASK_APPROVALS;
 
     /**
      * 작업 상태 전이 타임라인. WSS 단절 후 REST 로 복구하는 근거가 된다.

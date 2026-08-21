@@ -182,6 +182,7 @@ GET  /api/v1/tasks/{taskId}              → 200
 |---|---|---|
 | `ANALYZING` | 무슨 요청인지 분석 중 | 진행 표시 |
 | `NEEDS_CLARIFICATION` | 되물어야 함 | `question` 을 보여주고 다시 입력받기 |
+| `WAITING_FOR_APPROVAL` | **실행하기 전에 확인을 기다리는 중** | 승인·거절 버튼을 보여 주세요 (아래) |
 | `WAITING_FOR_DEVICE` | **PC 가 작업을 받을 수 없어 대기 중** | 아래 안내 문구를 그대로 |
 | `QUEUED` | PC 로 보냈고 수락 대기 | 진행 표시 |
 | `RUNNING` | 실행 중 | 진행 표시 |
@@ -195,6 +196,40 @@ GET  /api/v1/tasks/{taskId}              → 200
 > 기다리는 이유가 두 가지입니다 — **PC 가 꺼져 있거나, 작업 수신을 꺼 두었거나.** 서버가
 > 타임라인 안내 문구로 구분해 주니 그대로 보여주면 됩니다. ("PC 가 연결되면 실행합니다" /
 > "PC 가 작업 수신을 다시 켜면 실행합니다") 둘 다인 경우에는 연결부터 안내합니다.
+
+#### 실행 전 확인 (`WAITING_FOR_APPROVAL`)
+
+**지금은 이 상태가 오지 않습니다.** 확인이 필요한 작업이 아직 하나도 없기 때문입니다 — 지금 있는 작업은 모두 읽기 전용이거나 서버가 하는 일이라 물어볼 것이 없습니다. 파일이나 코드를 **고치는** 작업이 생기면 그때부터 옵니다.
+
+미리 다뤄 두시면 그 기능이 붙을 때 화면을 고치지 않아도 됩니다.
+
+```
+GET  /api/v1/tasks/{taskId}              → 200
+{ "data": { "status": "WAITING_FOR_APPROVAL",
+            "taskType": "…", "parameters": { … },
+            "approval": { "status": "PENDING", "version": 0,
+                          "expiresAt": "2026-08-21T15:40:00+09:00" } } }
+
+POST /api/v1/tasks/{taskId}/approval     → 200
+If-Match: "0"
+{ "decision": "APPROVE" }        // 또는 "REJECT"
+```
+
+**`taskType` 과 `parameters` 가 이미 채워져 있습니다.** 무엇을 실행하려는지 그대로 보여 주시면 됩니다 — 서버는 사용자가 본 것과 같은 내용만 실행합니다.
+
+**`If-Match` 에 `approval.version` 을 넣어 주세요.** 기기 수정과 같은 방식입니다. 두 번 눌러도 한 번만 반영됩니다.
+
+| 응답 | 뜻 |
+|---|---|
+| 200 | 반영됨. **승인이면 이미 실행까지 이어진 상태**가 응답에 담깁니다 |
+| 412 `RESOURCE_VERSION_MISMATCH` | 이미 결정됐거나 기한이 지났습니다. 다시 조회해 주세요 |
+| 404 `RESOURCE_NOT_FOUND` | 확인이 걸리지 않은 작업입니다 |
+
+**거절하면 `FAILED` + `APPROVAL_REJECTED` 입니다.** 실패이지만 잘못된 것은 없으니 오류처럼 보여 주지 마세요.
+
+**기한이 지나면 `EXPIRED` 입니다.** 기본 10분이고 `approval.expiresAt` 에 실제 시각이 옵니다. 남은 시간을 함께 보여 주면 사용자가 놓치지 않습니다.
+
+> **승인 뒤에는 되돌릴 수 없습니다.** 실행이 이미 시작되기 때문입니다. 누르기 전에 확인을 한 번 받는 편이 좋습니다.
 
 > `POST` 응답의 `status` 는 **고정값이 아닙니다.** 접수 시점에 이미 정해진 실제 상태가 옵니다.
 > PC 가 붙어 있으면 `QUEUED`, 꺼져 있으면 `WAITING_FOR_DEVICE`, 못 알아들었으면 `FAILED` 입니다.
@@ -654,6 +689,7 @@ Gemma 의 추론량과는 무관합니다.
 | `WORKSPACE_NOT_FOUND` | 422 | **분석할 프로젝트 폴더가 없습니다.** PC 의 Agent 에서 폴더를 등록하도록 안내해 주세요 |
 | `CODE_AGENT_NOT_CONFIGURED` | 422 | **그 PC 에 Claude Code·Codex 가 없습니다.** 폴더를 더 등록해도 풀리지 않으니 설치를 안내해 주세요 |
 | `POLICY_DENIED` | 403 | 허용되지 않은 경로 또는 작업 |
+| `APPROVAL_REJECTED` | 422 | **사용자가 실행을 거절했습니다.** 실패이지만 잘못된 것은 없으니 오류처럼 붉게 보여 주지 마세요 — 사용자가 자기 선택을 문제로 읽습니다 |
 | `AGENT_REJECTED` | 422 | PC 가 작업을 받지 않음. 사유를 알 수 없을 때 옵니다 |
 | `AGENT_TASK_FAILED` | 422 | PC 에서 실행이 끝나지 못함. 사유를 알 수 없을 때 옵니다 |
 | `DEVICE_REVOKED` | 403 | **등록이 해제된 PC 입니다.** `FORBIDDEN` 과 달리 다시 시도할 여지가 없으니 재등록을 안내해 주세요 |

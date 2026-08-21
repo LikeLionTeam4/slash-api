@@ -11,6 +11,7 @@ import com.likelion.slash.jooq.tables.DevicePairingRequests;
 import com.likelion.slash.jooq.tables.Devices;
 import com.likelion.slash.jooq.tables.IdempotencyRecords;
 import com.likelion.slash.jooq.tables.OutboxEvents;
+import com.likelion.slash.jooq.tables.TaskApprovals;
 import com.likelion.slash.jooq.tables.Tasks;
 
 import org.jooq.Index;
@@ -39,6 +40,7 @@ public class Indexes {
     public static final Index IDX_OUTBOX_UNPUBLISHED = Internal.createIndex(DSL.name("idx_outbox_unpublished"), OutboxEvents.OUTBOX_EVENTS, new OrderField[] { OutboxEvents.OUTBOX_EVENTS.AVAILABLE_AT, OutboxEvents.OUTBOX_EVENTS.ID }, false);
     public static final Index IDX_PAIRING_CODE_HASH = Internal.createIndex(DSL.name("idx_pairing_code_hash"), DevicePairingRequests.DEVICE_PAIRING_REQUESTS, new OrderField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.CODE_HASH }, false);
     public static final Index IDX_PAIRING_PENDING_EXPIRES = Internal.createIndex(DSL.name("idx_pairing_pending_expires"), DevicePairingRequests.DEVICE_PAIRING_REQUESTS, new OrderField[] { DevicePairingRequests.DEVICE_PAIRING_REQUESTS.EXPIRES_AT }, false);
+    public static final Index IDX_TASK_APPROVALS_PENDING_EXPIRY = Internal.createIndex(DSL.name("idx_task_approvals_pending_expiry"), TaskApprovals.TASK_APPROVALS, new OrderField[] { TaskApprovals.TASK_APPROVALS.EXPIRES_AT }, false);
     public static final Index IDX_TASKS_DEVICE_STATUS = Internal.createIndex(DSL.name("idx_tasks_device_status"), Tasks.TASKS, new OrderField[] { Tasks.TASKS.DEVICE_ID, Tasks.TASKS.STATUS }, false);
     public static final Index IDX_TASKS_USER_CREATED = Internal.createIndex(DSL.name("idx_tasks_user_created"), Tasks.TASKS, new OrderField[] { Tasks.TASKS.USER_ID, Tasks.TASKS.CREATED_AT.desc(), Tasks.TASKS.ID.desc() }, false);
     public static final Index UK_DEVICES_TOKEN_HASH = Internal.createIndex(DSL.name("uk_devices_token_hash"), Devices.DEVICES, new OrderField[] { Devices.DEVICES.DEVICE_TOKEN_HASH }, true);
