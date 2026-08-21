@@ -1,6 +1,7 @@
 package com.likelion.slash.auth;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -10,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.common.enums.UserStatus;
 import org.jooq.DSLContext;
+import org.springframework.http.HttpHeaders;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -113,7 +115,34 @@ class MeControllerTest {
     void 토큰이_없으면_거부한다() throws Exception {
         mockMvc.perform(get("/api/v1/me"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.error.code").value("AUTH_REQUIRED"));
+                .andExpect(jsonPath("$.error.code").value("AUTH_REQUIRED"))
+                // 실패가 아니라 "Bearer 토큰이 필요하다" 는 안내라 이유를 붙이지 않는다. (RFC 6750 §3)
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer"));
+    }
+
+    @Test
+    @DisplayName("토큰을 보냈는데 거부한 것은 안 보낸 것과 구분된다")
+    void 거부한_이유가_헤더에_남는다() throws Exception {
+        // 이유를 남기지 않아 조사가 하루를 잡아먹은 적이 있다 (#56) — 토큰을 아예 안 보냈을
+        // 때와 검증에 실패했을 때의 응답이 바이트까지 같아서 밖에서는 원인을 가릴 수 없었다.
+        // 실제 원인은 서버가 Cognito 공개키를 가져오지 못한 것이었다.
+        String 규칙에_맞지_않는_토큰 = "a".repeat(65);
+
+        String 헤더 = mockMvc.perform(get("/api/v1/me")
+                        .header("Authorization", "Bearer " + 규칙에_맞지_않는_토큰))
+                .andExpect(status().isUnauthorized())
+                // 응답 본문은 그대로다. 프론트는 error.code 로 분기하고 있다.
+                .andExpect(jsonPath("$.error.code").value("AUTH_REQUIRED"))
+                .andReturn()
+                .getResponse()
+                .getHeader(HttpHeaders.WWW_AUTHENTICATE);
+
+        assertThat(헤더).isNotNull();
+        assertThat(헤더).startsWith("Bearer ");
+        assertThat(헤더).contains("error=");
+
+        // 토큰을 안 보냈을 때와 같은 값이면 이 시험은 아무것도 지키지 못한다.
+        assertThat(헤더).isNotEqualTo("Bearer");
     }
 
     @Test

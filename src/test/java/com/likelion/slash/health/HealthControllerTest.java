@@ -1,6 +1,8 @@
 package com.likelion.slash.health;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.matchesPattern;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -68,8 +70,11 @@ class HealthControllerTest {
     @DisplayName("Basic 인증 챌린지를 보내지 않는다")
     void basic_인증을_사용하지_않는다() throws Exception {
         // Cognito Access Token 을 쓰므로 브라우저 기본 로그인 창이 뜨면 안 된다.
+        //
+        // 헤더가 있는 것 자체는 괜찮다 — 창을 띄우는 것은 Basic 챌린지이고, Bearer 는 띄우지
+        // 않는다. 그 자리는 오히려 거부한 이유를 적어야 하는 곳이다. (RFC 6750 §3 · #56)
         mockMvc.perform(get("/api/v1/me"))
-                .andExpect(header().doesNotExist("WWW-Authenticate"));
+                .andExpect(header().string("WWW-Authenticate", not(containsString("Basic"))));
     }
 
     @Test
