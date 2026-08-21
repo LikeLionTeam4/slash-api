@@ -10,6 +10,7 @@ import com.likelion.slash.jooq.tables.AuditEvents.AuditEventsPath;
 import com.likelion.slash.jooq.tables.DevicePairingRequests.DevicePairingRequestsPath;
 import com.likelion.slash.jooq.tables.Devices.DevicesPath;
 import com.likelion.slash.jooq.tables.IdempotencyRecords.IdempotencyRecordsPath;
+import com.likelion.slash.jooq.tables.TaskApprovals.TaskApprovalsPath;
 import com.likelion.slash.jooq.tables.Tasks.TasksPath;
 import com.likelion.slash.jooq.tables.records.UsersRecord;
 
@@ -243,6 +244,19 @@ public class Users extends TableImpl<UsersRecord> {
             _devicePairingRequests = new DevicePairingRequestsPath(this, null, Keys.DEVICE_PAIRING_REQUESTS__FK_PAIRING_USER.getInverseKey());
 
         return _devicePairingRequests;
+    }
+
+    private transient TaskApprovalsPath _taskApprovals;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.task_approvals</code> table
+     */
+    public TaskApprovalsPath taskApprovals() {
+        if (_taskApprovals == null)
+            _taskApprovals = new TaskApprovalsPath(this, null, Keys.TASK_APPROVALS__FK_TASK_APPROVALS_DECIDED_BY.getInverseKey());
+
+        return _taskApprovals;
     }
 
     private transient TasksPath _tasks;

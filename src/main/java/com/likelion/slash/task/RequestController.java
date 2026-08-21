@@ -2,8 +2,11 @@ package com.likelion.slash.task;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.likelion.slash.approval.dto.ApprovalDecisionRequest;
+import com.likelion.slash.approval.dto.TaskApprovalResponse;
 import com.likelion.slash.auth.AuthenticatedUser;
 import com.likelion.slash.auth.AuthenticatedUserService;
+import com.likelion.slash.common.EntityTag;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.response.ApiResponse;
 import com.likelion.slash.device.DeviceRepository;
@@ -19,6 +22,7 @@ import java.util.UUID;
 import org.jooq.JSONB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -131,10 +135,46 @@ public class RequestController {
                 readJson(task.getResult()),
                 task.getErrorCode(),
                 question(task),
+                approvalOf(task),
                 task.getCorrelationId(),
                 task.getCreatedAt(),
                 task.getUpdatedAt(),
                 task.getCompletedAt()));
+    }
+
+    /**
+     * 실행하기 전 확인에 답한다. (P0-C · 계획 문서 §1.5)
+     *
+     * <p><b>{@code If-Match} 가 필요하다.</b> 상세 조회 응답의 {@code approval.version} 을
+     * 그대로 넣는다. 화면이 낡은 값을 들고 두 번 눌러도 한 번만 반영된다.
+     *
+     * <p>승인하면 그 자리에서 실행으로 이어진다 — 접수 때와 같은 경로를 탄다. 거절하면
+     * 실패로 마감하고 아무것도 실행하지 않는다.
+     *
+     * <p>이미 결정됐거나 기한이 지난 요청은 {@code RESOURCE_VERSION_MISMATCH} (412) 다.
+     * 실행이 시작된 뒤에는 되돌릴 방법이 없으므로 상태로 막는 것이 유일한 보호다.
+     */
+    @PostMapping("/tasks/{taskId}/approval")
+    public ApiResponse<TaskDetailResponse> decideApproval(
+            @PathVariable UUID taskId,
+            @Valid @RequestBody ApprovalDecisionRequest request,
+            @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch) {
+
+        AuthenticatedUser user = authenticatedUserService.current();
+        TasksRecord task = taskService.findOwned(user, taskId);
+
+        taskService.decideApproval(user, task, request.decision(), EntityTag.parseVersion(ifMatch));
+
+        // 결정 뒤의 모습을 그대로 돌려준다. 화면이 다시 조회하지 않아도 되고,
+        // 승인이면 이미 실행까지 이어진 상태가 보인다.
+        return get(taskId);
+    }
+
+    /** 실행 전 확인이 걸린 작업에만 있다. 그렇지 않으면 응답에서 빠진다. */
+    private TaskApprovalResponse approvalOf(TasksRecord task) {
+        return taskService.findApproval(task.getId())
+                .map(TaskApprovalResponse::from)
+                .orElse(null);
     }
 
     /**

@@ -14,6 +14,7 @@ import com.likelion.slash.jooq.tables.DeviceSearchFolders;
 import com.likelion.slash.jooq.tables.Devices;
 import com.likelion.slash.jooq.tables.IdempotencyRecords;
 import com.likelion.slash.jooq.tables.OutboxEvents;
+import com.likelion.slash.jooq.tables.TaskApprovals;
 import com.likelion.slash.jooq.tables.TaskEvents;
 import com.likelion.slash.jooq.tables.Tasks;
 import com.likelion.slash.jooq.tables.Users;
@@ -90,6 +91,11 @@ public class Public extends SchemaImpl {
     public final OutboxEvents OUTBOX_EVENTS = OutboxEvents.OUTBOX_EVENTS;
 
     /**
+     * The table <code>public.task_approvals</code>.
+     */
+    public final TaskApprovals TASK_APPROVALS = TaskApprovals.TASK_APPROVALS;
+
+    /**
      * 작업 상태 전이 타임라인. WSS 단절 후 REST 로 복구하는 근거가 된다.
      */
     public final TaskEvents TASK_EVENTS = TaskEvents.TASK_EVENTS;
@@ -130,6 +136,7 @@ public class Public extends SchemaImpl {
             Devices.DEVICES,
             IdempotencyRecords.IDEMPOTENCY_RECORDS,
             OutboxEvents.OUTBOX_EVENTS,
+            TaskApprovals.TASK_APPROVALS,
             TaskEvents.TASK_EVENTS,
             Tasks.TASKS,
             Users.USERS

@@ -115,6 +115,14 @@ public enum ErrorCode {
     POLICY_DENIED(HttpStatus.FORBIDDEN, "허용되지 않은 경로 또는 작업입니다."),
 
     /**
+     * 사용자가 실행을 거절했다. (P0-C · 계획 문서 §1.5)
+     *
+     * <p>실패이지만 잘못된 것은 없다. 화면이 오류처럼 붉게 보여 주면 사용자는 자기가 한
+     * 선택을 문제로 읽는다.
+     */
+    APPROVAL_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "실행하지 않았습니다."),
+
+    /**
      * Agent 가 작업 자체를 받지 않음. ({@code ACK.accepted=false} 인데 사유가 없거나 모르는 값)
      *
      * <p>이름은 참조 구현({@code mock-api/src/taskOrchestrator.ts})의 fallback 을 그대로 따른다.

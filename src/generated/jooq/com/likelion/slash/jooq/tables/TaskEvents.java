@@ -209,9 +209,9 @@ public class TaskEvents extends TableImpl<TaskEventsRecord> {
     @Override
     public List<Check<TaskEventsRecord>> getChecks() {
         return Arrays.asList(
-            Internal.createCheck(this, DSL.name("ck_task_events_from_status"), "(((from_status IS NULL) OR ((from_status)::text = ANY ((ARRAY['CREATED'::character varying, 'ANALYZING'::character varying, 'NEEDS_CLARIFICATION'::character varying, 'WAITING_FOR_DEVICE'::character varying, 'QUEUED'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'EXPIRED'::character varying])::text[]))))", true),
+            Internal.createCheck(this, DSL.name("ck_task_events_from_status"), "(((from_status IS NULL) OR ((from_status)::text = ANY ((ARRAY['CREATED'::character varying, 'ANALYZING'::character varying, 'NEEDS_CLARIFICATION'::character varying, 'WAITING_FOR_APPROVAL'::character varying, 'WAITING_FOR_DEVICE'::character varying, 'QUEUED'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'EXPIRED'::character varying])::text[]))))", true),
             Internal.createCheck(this, DSL.name("ck_task_events_sequence"), "((sequence >= 1))", true),
-            Internal.createCheck(this, DSL.name("ck_task_events_to_status"), "(((to_status)::text = ANY ((ARRAY['CREATED'::character varying, 'ANALYZING'::character varying, 'NEEDS_CLARIFICATION'::character varying, 'WAITING_FOR_DEVICE'::character varying, 'QUEUED'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'EXPIRED'::character varying])::text[])))", true),
+            Internal.createCheck(this, DSL.name("ck_task_events_to_status"), "(((to_status)::text = ANY ((ARRAY['CREATED'::character varying, 'ANALYZING'::character varying, 'NEEDS_CLARIFICATION'::character varying, 'WAITING_FOR_APPROVAL'::character varying, 'WAITING_FOR_DEVICE'::character varying, 'QUEUED'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'EXPIRED'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_task_events_transition"), "(((from_status)::text IS DISTINCT FROM (to_status)::text))", true)
         );
     }

@@ -2,6 +2,7 @@ package com.likelion.slash.task.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.likelion.slash.approval.dto.TaskApprovalResponse;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -14,6 +15,8 @@ import java.util.UUID;
  *
  * @param processingRoute 작업 유형에서 파생된 상수. 유형이 같으면 언제나 같은 값이다
  * @param executionTarget 실제로 실행한 주체. V013 이전에 접수된 작업은 비어 있다
+ * @param approval 실행 전 확인이 걸린 작업에만 있다. 화면은 이 값의 {@code version} 을
+ *                 {@code If-Match} 로 되돌려 준다
  * @param question 되물어야 할 때 보여줄 말. {@code NEEDS_CLARIFICATION} 이 아니면 비어 있다.
  *                 별도 열을 두지 않고 상태 전이 기록의 설명을 그대로 쓴다.
  */
@@ -30,6 +33,7 @@ public record TaskDetailResponse(
         JsonNode result,
         String errorCode,
         String question,
+        TaskApprovalResponse approval,
         UUID correlationId,
         OffsetDateTime createdAt,
         OffsetDateTime updatedAt,

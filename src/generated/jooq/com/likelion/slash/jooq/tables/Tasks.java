@@ -11,6 +11,7 @@ import com.likelion.slash.jooq.tables.AgentDispatches.AgentDispatchesPath;
 import com.likelion.slash.jooq.tables.AsyncJobs.AsyncJobsPath;
 import com.likelion.slash.jooq.tables.Devices.DevicesPath;
 import com.likelion.slash.jooq.tables.IdempotencyRecords.IdempotencyRecordsPath;
+import com.likelion.slash.jooq.tables.TaskApprovals.TaskApprovalsPath;
 import com.likelion.slash.jooq.tables.TaskEvents.TaskEventsPath;
 import com.likelion.slash.jooq.tables.Users.UsersPath;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
@@ -317,6 +318,19 @@ public class Tasks extends TableImpl<TasksRecord> {
         return _idempotencyRecords;
     }
 
+    private transient TaskApprovalsPath _taskApprovals;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.task_approvals</code> table
+     */
+    public TaskApprovalsPath taskApprovals() {
+        if (_taskApprovals == null)
+            _taskApprovals = new TaskApprovalsPath(this, null, Keys.TASK_APPROVALS__FK_TASK_APPROVALS_TASK.getInverseKey());
+
+        return _taskApprovals;
+    }
+
     private transient TaskEventsPath _taskEvents;
 
     /**
@@ -341,7 +355,7 @@ public class Tasks extends TableImpl<TasksRecord> {
             Internal.createCheck(this, DSL.name("ck_tasks_result_or_error"), "(((result IS NULL) OR (error_code IS NULL)))", true),
             Internal.createCheck(this, DSL.name("ck_tasks_result_size"), "(((result IS NULL) OR (octet_length((result)::text) <= 65536)))", true),
             Internal.createCheck(this, DSL.name("ck_tasks_runner_requires_device"), "((((execution_target)::text IS DISTINCT FROM 'RUNNER'::text) OR (device_id IS NOT NULL)))", true),
-            Internal.createCheck(this, DSL.name("ck_tasks_status"), "(((status)::text = ANY ((ARRAY['CREATED'::character varying, 'ANALYZING'::character varying, 'NEEDS_CLARIFICATION'::character varying, 'WAITING_FOR_DEVICE'::character varying, 'QUEUED'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'EXPIRED'::character varying])::text[])))", true),
+            Internal.createCheck(this, DSL.name("ck_tasks_status"), "(((status)::text = ANY ((ARRAY['CREATED'::character varying, 'ANALYZING'::character varying, 'NEEDS_CLARIFICATION'::character varying, 'WAITING_FOR_APPROVAL'::character varying, 'WAITING_FOR_DEVICE'::character varying, 'QUEUED'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'EXPIRED'::character varying])::text[])))", true),
             Internal.createCheck(this, DSL.name("ck_tasks_task_type"), "(((task_type IS NULL) OR ((task_type)::text = ANY ((ARRAY['WEATHER_LOOKUP'::character varying, 'FILE_SEARCH'::character varying, 'FILE_OPEN'::character varying, 'SYSTEM_STATUS'::character varying, 'TEXT_SUMMARY'::character varying, 'CODE_ANALYSIS'::character varying, 'AI_AGENT_USAGE'::character varying])::text[]))))", true)
         );
     }

@@ -22,6 +22,15 @@ public enum TaskStatus {
     /** 위치·기기·검색 루트 등 필수 인자가 부족함 */
     NEEDS_CLARIFICATION,
 
+    /**
+     * 실행하기 전에 사용자 확인을 기다림. (P0-C · 계획 문서 §1.5)
+     *
+     * <p>분석은 끝났고 무엇을 할지도 정해졌지만 <b>아직 아무것도 하지 않은</b> 상태다.
+     * 승인하면 원래 가려던 경로로 이어지고, 거절하면 실패로, 답이 없으면 기한이 지나
+     * 만료로 마감한다.
+     */
+    WAITING_FOR_APPROVAL,
+
     /** 대상 PC 연결 또는 READY 상태를 기다림 */
     WAITING_FOR_DEVICE,
 
@@ -52,8 +61,11 @@ public enum TaskStatus {
      */
     private static final Map<TaskStatus, Set<TaskStatus>> ALLOWED = Map.of(
             CREATED,             EnumSet.of(ANALYZING, FAILED, EXPIRED),
-            ANALYZING,           EnumSet.of(NEEDS_CLARIFICATION, WAITING_FOR_DEVICE, QUEUED, RUNNING, FAILED, EXPIRED),
+            ANALYZING,           EnumSet.of(NEEDS_CLARIFICATION, WAITING_FOR_APPROVAL, WAITING_FOR_DEVICE,
+                                            QUEUED, RUNNING, FAILED, EXPIRED),
             NEEDS_CLARIFICATION, EnumSet.of(ANALYZING, FAILED, EXPIRED),
+            // 승인하면 원래 가려던 곳으로 이어진다. PC 가 꺼져 있으면 그 앞에서 기다린다.
+            WAITING_FOR_APPROVAL, EnumSet.of(QUEUED, WAITING_FOR_DEVICE, FAILED, EXPIRED),
             WAITING_FOR_DEVICE,  EnumSet.of(QUEUED, FAILED, EXPIRED),
             QUEUED,              EnumSet.of(RUNNING, FAILED, EXPIRED),
             RUNNING,             EnumSet.of(SUCCEEDED, FAILED, EXPIRED),
