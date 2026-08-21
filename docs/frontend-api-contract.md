@@ -290,8 +290,11 @@ If-Match: "0"
 > 말씀해 주세요"** 로 안내해 주세요 — 사용자가 다시 말하면 되는 상황입니다. 날씨 서비스
 > 자체에 닿지 못하면 `UPSTREAM_UNAVAILABLE` (503) 이고, 이건 기다리는 수밖에 없습니다.
 
-> **`/summary` 는 PC 를 고르지 않습니다.** 서버가 하는 일이라 등록된 PC 가 없어도
-> 실행됩니다. `selectedDeviceId` 를 보내도 무시합니다.
+> **`/summary` 는 기본적으로 PC 를 고르지 않습니다.** 서버가 하는 일이라 등록된 PC 가 없어도
+> 실행됩니다. **다만 `selectedDeviceId` 를 보냈고 그 PC 가 실행기 능력으로 `TEXT_SUMMARY` 를
+> 보고했으면 그 PC 로 보냅니다**(로컬 Claude Code·Codex, slash-docs#3 권장 순서 7번). 그
+> PC 가 보고한 적 없으면(오래된 실행기 버전, 로컬 CLI 미설치 등) 선택하지 않았을 때와
+> 마찬가지로 조용히 서버가 처리합니다 — 실패로 보이지 않습니다.
 >
 > **접수 응답이 곧바로 `SUCCEEDED` 로 오는 경우가 생겼습니다.** GPU 모델 대신 CPU 추출
 > 요약을 쓰면 수십 밀리초에 끝나기 때문입니다(slash-docs#3). 예전처럼 `QUEUED` 로 온 뒤
@@ -562,10 +565,18 @@ GPU 모델(Gemma) — 문장을 새로 만듭니다. 과거 이력에 남아 있
 { "summary": "슬래시는 사용자가 브라우저에서 …", "model": "gemma3:4b" }
 ```
 
-> **`executionTarget` 은 둘 다 `BACKEND` 입니다.** 그 값은 *어디서* 실행했는지만 나타냅니다
-> (§`processingRoute` 와 `executionTarget` 은 다릅니다). *무엇으로* 했는지는 결과 안의
-> `engine`·`model` 이 가릅니다. 앞으로 브라우저 WebLLM 이 열리면 그때 `executionTarget` 이
-> `BROWSER` 로 갈라집니다. (slash-docs#3)
+PC 실행기(Claude Code·Codex) — `selectedDeviceId` 로 고른 PC 가 요약 능력을 보고했을 때만
+옵니다. `executionTarget` 이 이때는 `RUNNER` 입니다.
+
+```json
+{ "summaryAdapter": "CLAUDE_CODE", "summary": "…",
+  "durationMs": 1820, "collectedAt": "2026-08-21T20:30:00+09:00" }
+```
+
+> **위 세 결과의 `executionTarget` 은 서로 다릅니다.** CPU·GPU 는 `BACKEND`, PC 실행기는
+> `RUNNER` 입니다 — 어디서 실행했는지는 이 값으로, 무엇으로 했는지는 결과 안의
+> `engine`·`model`·`summaryAdapter` 로 가르세요. 앞으로 브라우저 WebLLM 이 열리면 그때
+> `executionTarget` 이 `BROWSER` 로도 갈라집니다. (slash-docs#3)
 
 #### `CODE_ANALYSIS`
 
