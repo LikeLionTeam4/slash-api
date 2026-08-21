@@ -42,8 +42,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @SpringBootTest
 @Transactional
-// 이 스윕은 GPU 요약 전용이다. CPU 추출 요약은 원장을 남기지 않아 스윕이 볼 것이 없고,
-// 기본값으로 두면 빈 자체가 만들어지지 않는다. (slash-docs#3)
+// 다시 돌리는 것은 GPU 요약일 때만 한다. 기본값(CPU)에서는 LlmReadiness 빈이 없어
+// 재실행을 건너뛰므로, 그 동작은 CpuEngineSweepTest 가 따로 본다. (slash-docs#3)
 @TestPropertySource(properties = "slash.summary.engine=GEMMA")
 class LlmJobSweeperTest {
 
