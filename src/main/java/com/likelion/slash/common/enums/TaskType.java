@@ -1,8 +1,10 @@
 package com.likelion.slash.common.enums;
 
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 사용자 작업 유형. 메시지 프로토콜 정의 5.3 · 8.10
@@ -99,6 +101,16 @@ public enum TaskType {
 
     public enum Priority { P0, P1 }
 
+    /**
+     * 실행기가 지원 여부를 보고할 수 있는 작업.
+     *
+     * <p>{@code ck_device_capabilities_task_type} 이 허용하는 값과 같아야 한다.
+     * 어긋나면 Agent 의 보고를 저장하는 단계에서 제약 위반으로 실패한다.
+     * ({@link com.likelion.slash.device.DeviceCapabilityRepository#replaceAll})
+     */
+    private static final Set<TaskType> AGENT_CAPABILITIES = EnumSet.of(
+            FILE_SEARCH, FILE_OPEN, SYSTEM_STATUS, CODE_ANALYSIS, AI_AGENT_USAGE, TEXT_SUMMARY);
+
     private final String slashCommand;
     private final ProcessingRoute processingRoute;
     private final Priority priority;
@@ -161,9 +173,18 @@ public enum TaskType {
         return processingRoute == ProcessingRoute.LOCAL_AGENT;
     }
 
-    /** Agent 가 지원 여부를 보고해야 하는 작업인지 확인한다. (device_capabilities) */
+    /**
+     * 실행기가 지원 여부를 보고할 수 있는 작업인지 확인한다. ({@code device_capabilities})
+     *
+     * <p><b>{@link #requiresDevice()} 와 같지 않다.</b> 앞은 "PC 가 없으면 실행할 수 없는
+     * 작업"이고 이것은 "실행기가 처리할 수 있는 작업"이다. {@code TEXT_SUMMARY} 가 둘을
+     * 갈라 놓는다 — PC 없이 브라우저나 서버에서도 실행되지만, 등록한 PC 의 Claude Code·Codex
+     * 로도 처리할 수 있다. (slash-docs#3)
+     *
+     * <p>이 목록은 {@code ck_device_capabilities_task_type} 과 같아야 한다.
+     */
     public boolean isAgentCapability() {
-        return requiresDevice();
+        return AGENT_CAPABILITIES.contains(this);
     }
 
     /** "/weather" 같은 Slash 명령 문자열로 작업 유형을 찾는다. */

@@ -11,6 +11,7 @@ import com.likelion.slash.common.enums.DeviceOs;
 import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.jooq.DSLContext;
@@ -240,17 +241,38 @@ class DeviceRepositoryTest {
     }
 
     @Test
-    @DisplayName("로컬 실행이 아닌 작업 유형은 지원 목록에 넣지 않는다")
-    void 로컬_실행이_아닌_유형은_걸러진다() {
+    @DisplayName("서버만 할 수 있는 작업 유형은 지원 목록에 넣지 않는다")
+    void 서버가_하는_유형은_걸러진다() {
         long deviceId = 준비된_기기(dsl, 사용자(dsl));
 
-        // WEATHER_LOOKUP·TEXT_SUMMARY 는 서버·LLM 이 처리하므로 CHECK 제약이 거부한다.
+        // 날씨는 서버가 외부 API 로 직접 조회한다. 실행기가 보고해도 CHECK 제약이 거부한다.
+        //
+        // TEXT_SUMMARY 는 다르다 — PC 선택은 필요 없지만(requiresDevice 가 거짓) 등록한 PC 의
+        // Claude Code·Codex 로도 처리할 수 있어 지원 보고를 받는다. (slash-docs#3 · V013)
         capabilityRepository.replaceAll(deviceId,
                 List.of(TaskType.WEATHER_LOOKUP, TaskType.TEXT_SUMMARY, TaskType.FILE_SEARCH));
 
         assertThat(capabilityRepository.findAllByDeviceId(deviceId))
                 .extracting(record -> record.getTaskType())
-                .containsExactly(TaskType.FILE_SEARCH.name());
+                .containsExactlyInAnyOrder(TaskType.TEXT_SUMMARY.name(), TaskType.FILE_SEARCH.name());
+    }
+
+    @Test
+    @DisplayName("실행기가 보고할 수 있다고 정한 작업은 모두 저장된다")
+    void 지원_가능_목록이_DB_제약과_어긋나지_않는다() {
+        long deviceId = 준비된_기기(dsl, 사용자(dsl));
+
+        // isAgentCapability() 와 ck_device_capabilities_task_type 이 어긋나면 READY 처리가
+        // 통째로 실패한다. 자바만 고치면 시험은 통과하고 저장에서 터지는 자리라 함께 확인한다.
+        List<TaskType> 보고할_수_있는_것 = Arrays.stream(TaskType.values())
+                .filter(TaskType::isAgentCapability)
+                .toList();
+
+        capabilityRepository.replaceAll(deviceId, 보고할_수_있는_것);
+
+        assertThat(capabilityRepository.findAllByDeviceId(deviceId))
+                .extracting(record -> record.getTaskType())
+                .containsExactlyInAnyOrderElementsOf(보고할_수_있는_것.stream().map(TaskType::name).toList());
     }
 
     @Test

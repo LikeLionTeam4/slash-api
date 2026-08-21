@@ -159,6 +159,7 @@ Idempotency-Key: {UUID v4}
 GET  /api/v1/tasks/{taskId}              → 200
 { "data": { "taskId": "9c1e…", "status": "SUCCEEDED",
             "taskType": "SYSTEM_STATUS", "processingRoute": "LOCAL_AGENT",
+            "executionTarget": "RUNNER",
             "deviceId": "e0d6…", "inputText": "/status",
             "parameters": { … }, "result": { … }, "errorCode": null,
             "correlationId": "…", "createdAt": "…", "updatedAt": "…",
@@ -286,28 +287,56 @@ GET /api/v1/tasks                        → 200
 GET /api/v1/tasks?taskType=FILE_SEARCH&status=SUCCEEDED&deviceId=e0d6…&limit=20&cursor=…
 
 { "data": { "items": [
-      { "taskId": "06c805a0-70e3-43d1-a3c0-646aecc4c219", "status": "CREATED",
+      { "taskId": "2f1982b2-4fa8-45db-9d2e-ef5cf5b3d818", "status": "FAILED",
         "requestSummary": "어제 만든 그거 좀",
-        "createdAt": "2026-08-20T09:32:34.925993+09:00" },
+        "errorCode": "UNRECOGNIZED_COMMAND",
+        "createdAt": "2026-08-21T09:26:56.632748+09:00",
+        "completedAt": "2026-08-21T09:26:56.658342+09:00" },
 
-      { "taskId": "e9cf57ef-467a-4a20-8c12-e7e0a067ae74", "status": "QUEUED",
-        "taskType": "TEXT_SUMMARY", "processingRoute": "LLM_SERVICE",
-        "requestSummary": "이 글 세 줄로 요약해줘",
-        "createdAt": "2026-08-20T09:32:34.925615+09:00" },
-
-      { "taskId": "f634a7d4-7443-4319-b4e1-fd2007eb7fa4", "status": "SUCCEEDED",
+      { "taskId": "4d3e979e-5b21-481b-9e5a-b401704a3f5b", "status": "SUCCEEDED",
         "taskType": "WEATHER_LOOKUP", "processingRoute": "BACKEND_SERVICE",
+        "executionTarget": "BACKEND",
         "requestSummary": "오늘 서울 날씨 알려줘",
-        "createdAt": "2026-08-20T09:32:34.922341+09:00",
-        "completedAt": "2026-08-20T09:29:34.922341+09:00" }
+        "createdAt": "2026-08-21T09:26:25.287527+09:00",
+        "completedAt": "2026-08-21T09:26:28.21623+09:00" },
+
+      { "taskId": "db06a958-9301-45ea-86a6-7d52428b0d3a", "status": "SUCCEEDED",
+        "taskType": "TEXT_SUMMARY", "processingRoute": "LLM_SERVICE",
+        "requestSummary": "/summary 슬래시는 자연어로 내 컴퓨터를 다루는 서비스다. …",
+        "createdAt": "2026-08-19T14:43:11.60227+09:00",
+        "completedAt": "2026-08-19T14:43:12.644547+09:00" }
     ],
-    "nextCursor": "MjAyNi0wOC0yMFQwOTozMjozNC45MjU2MTUrMDk6MDB8MTI2MTc" } }
+    "nextCursor": "MjAyNi0wOC0xOVQxNDo0MzoxMS42MDIyNzArMDk6MDB8MTAzNjI" } }
 ```
 
-*(위는 실제로 받은 응답입니다. `nextCursor` 는 `limit=2` 로 불렀을 때 온 값입니다.)*
+*(위는 실제로 받은 응답입니다. `nextCursor` 는 `limit=3` 으로 불렀을 때 온 값입니다.
+맨 아래 줄은 `executionTarget` 이 생기기 전에 접수된 작업이라 그 값이 없습니다.)*
 
 **맨 위 줄처럼 `taskType` 이 없는 항목이 옵니다.** 아직 분석되지 않았거나 무슨 말인지
 알아내지 못한 요청입니다. 갈래 뱃지를 그릴 때 값이 없는 경우를 다뤄 주세요.
+
+#### `processingRoute` 와 `executionTarget` 은 다릅니다
+
+**"어디서 실행됐는지"를 화면에 보여줄 거라면 `executionTarget` 을 보세요.**
+
+| | 뜻 | 값 |
+|---|---|---|
+| `processingRoute` | 작업 유형에서 정해지는 상수. 유형이 같으면 언제나 같습니다 | `LOCAL_AGENT` · `BACKEND_SERVICE` · `LLM_SERVICE` |
+| `executionTarget` | **실제로 실행한 주체** | `RUNNER`(등록한 PC) · `BACKEND`(서버) · `BROWSER`(사용자 브라우저) |
+
+지금은 요약(`/summary`)만 빼면 두 값이 사실상 같습니다. 앞으로 **요약 하나가 브라우저·PC·서버
+셋 중 어디서든 실행**되기 때문에 갈라 두었습니다 — 그때부터는 같은 `TEXT_SUMMARY` 라도 건마다
+`executionTarget` 이 달라집니다. (slash-docs#3)
+
+> **오래된 작업에는 `executionTarget` 이 없습니다.** 이 값이 생기기 전에 접수된 작업은 실제로
+> 어디서 실행됐는지 서버가 기록해 두지 않았습니다. 지어내지 않고 비워 둔 것이라, 값이 없으면
+> "PC 에서 실행됨" 같은 뱃지를 그리지 말고 그 자리를 비워 주세요.
+>
+> **`BROWSER` 는 아직 오지 않습니다.** 브라우저 실행이 열리기 전까지 서버가 그 값을 쓰지
+> 않습니다. 미리 다뤄 두면 나중에 화면을 고치지 않아도 됩니다.
+
+**실행 위치는 서버가 정합니다.** 요청에 실어 보내는 값이 아니고, 보내도 무시합니다.
+브라우저가 자기 실행 결과를 PC 실행 결과인 것처럼 제출하는 것을 막기 위해서입니다.
 
 **결과 본문(`result`)과 입력값(`parameters`)은 목록에 없습니다.** 한 건에 64KB 까지 허용되어
 스무 줄이면 응답이 1MB 를 넘길 수 있어서입니다. 한 줄을 펼칠 때

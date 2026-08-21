@@ -6,7 +6,7 @@ import com.likelion.slash.common.Sha256;
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AiAgentProvider;
 import com.likelion.slash.common.enums.DeviceStatus;
-import com.likelion.slash.common.enums.ProcessingRoute;
+import com.likelion.slash.common.enums.ExecutionTarget;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
@@ -313,10 +313,55 @@ public class TaskService {
             return TaskStatus.NEEDS_CLARIFICATION;
         }
 
+        return switch (resolveExecutionTarget(taskType)) {
+            case RUNNER -> routeToDevice(user, task, taskType, nlu, selectedDeviceId);
+            case BACKEND -> routeToBackend(task, taskType, nlu);
+            // resolveExecutionTarget 이 아직 이 값을 내지 않는다. 도달하면 그쪽의 결함이다.
+            case BROWSER -> throw new IllegalStateException(
+                    "브라우저 실행은 아직 접수하지 않는다. taskType=" + taskType);
+        };
+    }
+
+    /**
+     * 이 작업을 어디서 실행할지 정한다. (slash-docs#3)
+     *
+     * <p><b>사용자나 NLU 가 정하지 않는다.</b> NLU 는 사용자 권한도 브라우저 상태도 PC 상태도
+     * 알지 못하고, 요청에 실려 온 값을 그대로 믿으면 브라우저가 자기 결과를 PC 결과인 것처럼
+     * 제출할 수 있다.
+     *
+     * <p>지금은 작업 유형에서 그대로 파생된다. {@code TEXT_SUMMARY} 를 브라우저나 PC 로도
+     * 보내기 시작하면 여기에 사용자 선택·WebLLM 사용 가능 여부·PC 상태가 들어온다.
+     * <b>그때 갈라질 자리를 미리 만들어 둔 것이지 지금 갈라지는 것은 아니다.</b>
+     *
+     * <p>{@code LLM_SERVICE} 가 {@code BACKEND} 로 오는 것은 GPU Gemma 도 서버가 실행하기
+     * 때문이다. CPU 추출 요약과 같은 자리에 서지만 <b>무엇으로 실행했는지</b>는 작업 결과가
+     * 구분한다.
+     */
+    private ExecutionTarget resolveExecutionTarget(TaskType taskType) {
         return switch (taskType.processingRoute()) {
-            case LOCAL_AGENT -> routeToDevice(user, task, taskType, nlu, selectedDeviceId);
-            case BACKEND_SERVICE -> routeToWeather(task, taskType, nlu);
-            case LLM_SERVICE -> routeToLlm(task, taskType, nlu);
+            case LOCAL_AGENT -> ExecutionTarget.RUNNER;
+            case BACKEND_SERVICE, LLM_SERVICE -> ExecutionTarget.BACKEND;
+        };
+    }
+
+    /**
+     * 서버가 실행하는 작업을 유형에 맞는 처리로 보낸다.
+     *
+     * <p><b>실행 위치와 처리 방법을 갈라 둔 이유가 여기다.</b> 예전에는 {@code BACKEND_SERVICE}
+     * 하나가 곧 날씨 조회였다. 서버가 하는 일이 둘 이상이 되는 순간 그 방식으로는 CPU 추출
+     * 요약이 날씨 조회로 들어간다. (slash-docs#3 리뷰)
+     *
+     * <p><b>{@code default} 를 쓰지 않고 전부 적는다.</b> 새 작업 유형을 서버 실행으로 붙이면서
+     * 여기를 잊으면 컴파일이 실패해야 한다 — {@code default} 로 두면 그 실수가 실행 중에
+     * 500 으로 드러난다.
+     */
+    private TaskStatus routeToBackend(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
+        return switch (taskType) {
+            case WEATHER_LOOKUP -> routeToWeather(task, taskType, nlu);
+            case TEXT_SUMMARY -> routeToLlm(task, taskType, nlu);
+            case FILE_SEARCH, FILE_OPEN, SYSTEM_STATUS, CODE_ANALYSIS, AI_AGENT_USAGE ->
+                    throw new IllegalStateException(
+                            "PC 실행 작업이 서버 경로로 들어왔다. taskType=" + taskType);
         };
     }
 
@@ -339,7 +384,7 @@ public class TaskService {
         boolean applied = stateWriter.applyAnalysisAndMove(
                 task.getId(),
                 taskType,
-                ProcessingRoute.BACKEND_SERVICE,
+                ExecutionTarget.BACKEND,
                 null,
                 toJsonb(parameters),
                 summarize(task.getInputText()),
@@ -437,7 +482,7 @@ public class TaskService {
         boolean applied = stateWriter.applyAnalysisAndMove(
                 task.getId(),
                 taskType,
-                ProcessingRoute.LOCAL_AGENT,
+                ExecutionTarget.RUNNER,
                 device.getId(),
                 toJsonb(parameters),
                 summarize(task.getInputText()),

@@ -3,7 +3,7 @@ package com.likelion.slash.task;
 import static com.likelion.slash.jooq.Tables.TASKS;
 
 import com.likelion.slash.common.SlashTime;
-import com.likelion.slash.common.enums.ProcessingRoute;
+import com.likelion.slash.common.enums.ExecutionTarget;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
@@ -197,27 +197,32 @@ public class TaskRepository {
     // ------------------------------------------------------------------
 
     /**
-     * NLU 분석 결과와 slash-api 가 결정한 처리 경로를 반영한다.
+     * NLU 분석 결과와 slash-api 가 결정한 실행 위치를 반영한다.
      *
-     * <p>처리 경로는 Tool 정책에 따라 slash-api 가 정한다. NLU 가 직접 정하지 않는다.
-     * {@code ck_tasks_local_agent_requires_device} 가 있으므로 로컬 실행 작업에는
-     * 반드시 대상 기기를 함께 넘겨야 한다.
+     * <p>실행 위치는 Tool 정책에 따라 slash-api 가 정한다. NLU 나 사용자가 정하지 않는다.
+     * {@code ck_tasks_runner_requires_device} 가 있으므로 PC 실행 작업에는 반드시 대상
+     * 기기를 함께 넘겨야 한다.
+     *
+     * <p><b>{@code processing_route} 는 넘겨받지 않고 작업 유형에서 파생시킨다.</b> 그 열은
+     * 언제나 유형에서 나오는 상수라 호출부가 정할 것이 없다. 실제로 어디서 실행했는지는
+     * {@code execution_target} 이 기록한다. (slash-docs#3 · V013)
      *
      * @return 반영 여부. 거짓이면 이미 다른 상태로 넘어간 작업이다.
      */
     public boolean applyAnalysis(long id,
                                  TaskType taskType,
-                                 ProcessingRoute processingRoute,
+                                 ExecutionTarget executionTarget,
                                  Long deviceId,
                                  JSONB parameters,
                                  String requestSummary) {
-        if (processingRoute == ProcessingRoute.LOCAL_AGENT && deviceId == null) {
-            throw new IllegalArgumentException("로컬 실행 작업에는 대상 기기가 필요합니다. taskId=" + id);
+        if (executionTarget == ExecutionTarget.RUNNER && deviceId == null) {
+            throw new IllegalArgumentException("PC 실행 작업에는 대상 기기가 필요합니다. taskId=" + id);
         }
 
         return dsl.update(TASKS)
                 .set(TASKS.TASK_TYPE, taskType.name())
-                .set(TASKS.PROCESSING_ROUTE, processingRoute.name())
+                .set(TASKS.PROCESSING_ROUTE, taskType.processingRoute().name())
+                .set(TASKS.EXECUTION_TARGET, executionTarget.name())
                 .set(TASKS.DEVICE_ID, deviceId)
                 .set(TASKS.PARAMETERS, parameters)
                 .set(TASKS.REQUEST_SUMMARY, requestSummary)

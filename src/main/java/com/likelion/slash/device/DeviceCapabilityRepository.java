@@ -38,8 +38,10 @@ public class DeviceCapabilityRepository {
      * <p>Agent 를 낮은 버전으로 되돌리면 지원 목록이 줄어들 수 있으므로,
      * 보고에 없는 항목은 남겨두지 않고 지운다.
      *
-     * <p>{@code ck_device_capabilities_task_type} 은 로컬 실행 작업만 허용한다.
-     * Agent 가 계약에 없는 값을 보내도 제약 위반으로 통째로 실패하지 않도록 여기서 먼저 거른다.
+     * <p>{@code ck_device_capabilities_task_type} 은 실행기가 처리할 수 있는 작업만 허용한다.
+     * 그 목록은 {@link TaskType#isAgentCapability()} 가 들고 있다 — PC 가 반드시 필요한
+     * 작업과 같지 않다({@code TEXT_SUMMARY}). Agent 가 계약에 없는 값을 보내도 제약 위반으로
+     * 통째로 실패하지 않도록 여기서 먼저 거른다.
      *
      * @param reported Agent 가 보고한 작업 유형
      */
