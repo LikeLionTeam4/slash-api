@@ -1,6 +1,6 @@
 package com.likelion.slash.task;
 
-import com.likelion.slash.common.enums.ProcessingRoute;
+import com.likelion.slash.common.enums.ExecutionTarget;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
@@ -78,7 +78,7 @@ public class TaskStateWriter {
     @Transactional
     public boolean applyAnalysisAndMove(long taskId,
                                         TaskType taskType,
-                                        ProcessingRoute processingRoute,
+                                        ExecutionTarget executionTarget,
                                         Long deviceId,
                                         JSONB parameters,
                                         String requestSummary,
@@ -86,7 +86,7 @@ public class TaskStateWriter {
                                         String reasonCode,
                                         String message) {
 
-        if (!taskRepository.applyAnalysis(taskId, taskType, processingRoute, deviceId, parameters, requestSummary)) {
+        if (!taskRepository.applyAnalysis(taskId, taskType, executionTarget, deviceId, parameters, requestSummary)) {
             log.debug("분석 결과를 반영하지 못했다. 이미 다른 상태다. taskId={}", taskId);
             return false;
         }

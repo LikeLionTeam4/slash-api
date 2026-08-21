@@ -68,6 +68,23 @@ class TaskTypeTest {
     }
 
     @Test
+    @DisplayName("실행기가 처리할 수 있는 작업과 PC 가 반드시 필요한 작업은 다르다")
+    void capability_와_기기_필요는_다르다() {
+        // 요약은 브라우저·서버에서도 실행되므로 PC 선택을 강요하지 않는다. 그러면서도 등록한
+        // PC 의 Claude Code·Codex 로 처리할 수 있어 실행기가 지원을 보고할 수 있다. (slash-docs#3)
+        assertThat(TaskType.TEXT_SUMMARY.requiresDevice()).isFalse();
+        assertThat(TaskType.TEXT_SUMMARY.isAgentCapability()).isTrue();
+
+        // 날씨는 서버가 외부 API 로 직접 조회한다. 실행기가 할 수 있는 일이 아니다.
+        assertThat(TaskType.WEATHER_LOOKUP.isAgentCapability()).isFalse();
+
+        // PC 가 있어야 하는 작업은 모두 실행기가 보고할 수 있어야 한다. 한쪽만 참이면
+        // 서버가 작업은 보내면서 그 PC 가 할 수 있는지는 영영 알지 못한다.
+        assertThat(Arrays.stream(TaskType.values()).filter(TaskType::requiresDevice))
+                .allMatch(TaskType::isAgentCapability);
+    }
+
+    @Test
     @DisplayName("이제 모든 작업 유형이 P0 다 — P0-B 편입이 끝났다")
     void p0_작업_유형() {
         // 계획 문서 §1.4 가 파일 열기·사용량 조회·코드 분석을 제품 본체(P0-B)로 옮기면서

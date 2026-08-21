@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.likelion.slash.common.SlashTime;
+import com.likelion.slash.common.enums.ExecutionTarget;
 import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
@@ -172,25 +173,53 @@ class TaskRepositoryTest {
         taskRepository.transition(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING);
 
         boolean 반영됨 = taskRepository.applyAnalysis(task.getId(), TaskType.WEATHER_LOOKUP,
-                ProcessingRoute.BACKEND_SERVICE, null,
+                ExecutionTarget.BACKEND, null,
                 JSONB.valueOf("{\"location\":\"서울\"}"), "서울 날씨 조회");
 
         assertThat(반영됨).isTrue();
         var 분석된_작업 = taskRepository.findById(task.getId()).orElseThrow();
         assertThat(분석된_작업.getTaskType()).isEqualTo(TaskType.WEATHER_LOOKUP.name());
-        assertThat(분석된_작업.getProcessingRoute()).isEqualTo(ProcessingRoute.BACKEND_SERVICE.name());
         assertThat(분석된_작업.getRequestSummary()).isEqualTo("서울 날씨 조회");
+
+        // 처리 경로는 유형에서 파생된 상수이고, 실행 위치는 서버가 정해 넘긴 값이다. 둘 다 남는다.
+        assertThat(분석된_작업.getProcessingRoute()).isEqualTo(ProcessingRoute.BACKEND_SERVICE.name());
+        assertThat(분석된_작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
     }
 
     @Test
-    @DisplayName("로컬 실행 작업에 대상 기기가 없으면 DB 에 닿기 전에 막는다")
-    void 로컬_실행에는_기기가_필요하다() {
+    @DisplayName("실행 위치 값은 모두 저장할 수 있다")
+    void 실행_위치가_DB_제약과_어긋나지_않는다() {
+        long userId = 사용자(dsl);
+        long deviceId = 준비된_기기(dsl, userId);
+
+        // ExecutionTarget 과 ck_tasks_execution_target 이 어긋나면 자바만 고친 채 시험은
+        // 통과하고 실제 저장에서 터진다. 값을 늘릴 때 마이그레이션을 잊지 않도록 함께 확인한다.
+        for (ExecutionTarget target : ExecutionTarget.values()) {
+            var task = taskRepository.create(userId, "실행 위치 " + target, null);
+            taskRepository.transition(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING);
+
+            // PC 실행에는 대상 기기가 있어야 한다. (ck_tasks_runner_requires_device)
+            Long 대상_기기 = target == ExecutionTarget.RUNNER ? deviceId : null;
+            TaskType taskType = target == ExecutionTarget.RUNNER
+                    ? TaskType.FILE_SEARCH
+                    : TaskType.TEXT_SUMMARY;
+
+            assertThat(taskRepository.applyAnalysis(
+                    task.getId(), taskType, target, 대상_기기, null, "실행 위치 확인")).isTrue();
+            assertThat(taskRepository.findById(task.getId()).orElseThrow().getExecutionTarget())
+                    .isEqualTo(target.name());
+        }
+    }
+
+    @Test
+    @DisplayName("PC 실행 작업에 대상 기기가 없으면 DB 에 닿기 전에 막는다")
+    void PC_실행에는_기기가_필요하다() {
         long userId = 사용자(dsl);
         var task = taskRepository.create(userId, "보고서 파일 찾아줘", null);
         taskRepository.transition(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING);
 
         assertThatThrownBy(() -> taskRepository.applyAnalysis(task.getId(), TaskType.FILE_SEARCH,
-                ProcessingRoute.LOCAL_AGENT, null, null, null))
+                ExecutionTarget.RUNNER, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("대상 기기가 필요");
     }

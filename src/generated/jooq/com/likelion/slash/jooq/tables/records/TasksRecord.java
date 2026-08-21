@@ -281,6 +281,23 @@ public class TasksRecord extends UpdatableRecordImpl<TasksRecord> {
         return (OffsetDateTime) get(16);
     }
 
+    /**
+     * Setter for <code>public.tasks.execution_target</code>. 작업을 실제로 실행한 주체.
+     * slash-api 가 정한다. V013 이전 행은 비어 있다.
+     */
+    public TasksRecord setExecutionTarget(String value) {
+        set(17, value);
+        return this;
+    }
+
+    /**
+     * Getter for <code>public.tasks.execution_target</code>. 작업을 실제로 실행한 주체.
+     * slash-api 가 정한다. V013 이전 행은 비어 있다.
+     */
+    public String getExecutionTarget() {
+        return (String) get(17);
+    }
+
     // -------------------------------------------------------------------------
     // Primary key information
     // -------------------------------------------------------------------------
@@ -304,7 +321,7 @@ public class TasksRecord extends UpdatableRecordImpl<TasksRecord> {
     /**
      * Create a detached, initialised TasksRecord
      */
-    public TasksRecord(Long id, UUID publicId, Long userId, Long deviceId, String inputText, String requestSummary, String taskType, String processingRoute, String status, JSONB parameters, JSONB result, String errorCode, UUID correlationId, Integer version, OffsetDateTime createdAt, OffsetDateTime updatedAt, OffsetDateTime completedAt) {
+    public TasksRecord(Long id, UUID publicId, Long userId, Long deviceId, String inputText, String requestSummary, String taskType, String processingRoute, String status, JSONB parameters, JSONB result, String errorCode, UUID correlationId, Integer version, OffsetDateTime createdAt, OffsetDateTime updatedAt, OffsetDateTime completedAt, String executionTarget) {
         super(Tasks.TASKS);
 
         setId(id);
@@ -324,6 +341,7 @@ public class TasksRecord extends UpdatableRecordImpl<TasksRecord> {
         setCreatedAt(createdAt);
         setUpdatedAt(updatedAt);
         setCompletedAt(completedAt);
+        setExecutionTarget(executionTarget);
         resetChangedOnNotNull();
     }
 }

@@ -24,6 +24,7 @@ import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AsyncJobStatus;
 import com.likelion.slash.common.enums.AsyncJobType;
 import com.likelion.slash.common.enums.DeviceStatus;
+import com.likelion.slash.common.enums.ExecutionTarget;
 import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.error.ErrorCode;
@@ -141,6 +142,7 @@ class TaskServiceTest {
         TasksRecord 작업 = 작업조회(응답.taskId());
         assertThat(작업.getTaskType()).isEqualTo("SYSTEM_STATUS");
         assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT.name());
+        assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.RUNNER.name());
         assertThat(작업.getDeviceId()).isEqualTo(deviceId);
     }
 
@@ -688,6 +690,7 @@ class TaskServiceTest {
 
         TasksRecord 작업 = 작업조회(응답.taskId());
         assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.BACKEND_SERVICE.name());
+        assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
         assertThat(작업.getDeviceId()).isNull();
 
         // 사용자가 말한 "수원" 과 실제로 조회한 곳이 다를 수 있어 찾아낸 지명을 함께 싣는다.
@@ -803,7 +806,11 @@ class TaskServiceTest {
 
         TasksRecord 작업 = 작업조회(응답.taskId());
         assertThat(작업.getTaskType()).isEqualTo("TEXT_SUMMARY");
+
+        // 처리 경로는 유형에서 파생된 상수라 그대로 LLM_SERVICE 다. 실제로 실행하는 곳은
+        // 서버이므로 실행 위치는 BACKEND 로 남는다 — 이 둘이 갈라지는 유일한 유형이다.
         assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.LLM_SERVICE.name());
+        assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
 
         // 요약은 서버 쪽 모델이 하는 일이라 PC 를 붙들지 않는다.
         assertThat(작업.getDeviceId()).isNull();

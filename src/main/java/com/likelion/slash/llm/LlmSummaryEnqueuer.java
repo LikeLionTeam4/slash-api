@@ -1,7 +1,7 @@
 package com.likelion.slash.llm;
 
 import com.likelion.slash.common.enums.AsyncJobType;
-import com.likelion.slash.common.enums.ProcessingRoute;
+import com.likelion.slash.common.enums.ExecutionTarget;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.job.AsyncJobRepository;
@@ -50,7 +50,7 @@ public class LlmSummaryEnqueuer {
                                              OffsetDateTime deadlineAt) {
 
         boolean applied = stateWriter.applyAnalysisAndMove(
-                taskId, taskType, ProcessingRoute.LLM_SERVICE, null, input, requestSummary,
+                taskId, taskType, ExecutionTarget.BACKEND, null, input, requestSummary,
                 TaskStatus.QUEUED, null, "요약을 맡겼습니다.");
 
         if (!applied) {
