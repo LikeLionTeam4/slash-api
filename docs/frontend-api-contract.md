@@ -310,6 +310,38 @@ If-Match: "0"
 > `UPSTREAM_UNAVAILABLE` (503) 이라 **잠시 뒤 다시 시도해 달라고** 안내해 주세요.
 > (GPU 경로를 쓰는 동안에는 모델이 밀렸을 때 `LLM_NOT_READY` (503) 도 옵니다)
 
+#### 브라우저에서 이미 끝낸 요약 제출하기 (`BROWSER`, slash-docs#3 권장 순서 3번)
+
+**WebGPU 를 지원하는 브라우저는 `/summary` 를 `POST /api/v1/requests` 로 보내지 않습니다.**
+WebLLM 이 원문을 브라우저 밖으로 내보내지 않고 그 자리에서 요약을 끝내고, **결과만** 아래
+Endpoint 로 제출해 다른 실행 경로와 같은 모양의 작업 이력 한 줄로 남깁니다.
+
+```
+POST /api/v1/tasks/text-summary/browser-result → 200
+Idempotency-Key: {UUID v4}                        ← 필수입니다. 없으면 400
+{ "inputLength": 1200, "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+  "promptVersion": "v1", "status": "SUCCEEDED",
+  "summary": "…", "durationMs": 2400 }
+
+{ "data": { "taskId": "9c1e…", "status": "SUCCEEDED",
+            "statusUrl": "/api/v1/tasks/9c1e…" } }
+```
+
+- **원문(`text`)은 이 요청에 없습니다.** `inputLength` (글자 수)만 보냅니다 — slash-docs#3
+  처리 원칙 2번("명시적인 브라우저 요약은 원문을 브라우저에 유지한다")에 따른 것이라,
+  임의로 원문을 함께 보내도 서버가 받을 자리가 없습니다.
+- `status` 가 `FAILED` 면 `summary` 대신 `errorMessage` (선택)를 보내세요 — 사용자에게 보여줄
+  짧은 설명이면 됩니다. `SUCCEEDED` 인데 `summary` 가 비어 있으면 `VALIDATION_ERROR` (400) 로
+  거부됩니다.
+- **`POST /api/v1/requests` 와 달리 202 가 아니라 200 이고, 응답 시점에 이미 최종 상태
+  (`SUCCEEDED`/`FAILED`)입니다.** 이 Endpoint 는 실행을 시작하는 게 아니라 이미 끝난 실행을
+  기록하는 것이라 폴링할 것이 없습니다.
+- **`Idempotency-Key` 가 필수입니다.** `/requests` 는 없어도 되지만, 여기서는 재전송이 같은
+  작업을 다시 조회하는 게 아니라 **새 이력 한 줄을 또 만드는 것**으로 이어지므로, 네트워크
+  재시도 한 번이 중복 이력으로 남지 않도록 프론트가 요약 1회당 키를 하나만 써야 합니다.
+- 결과에 남는 `executionTarget` 은 `BROWSER` 입니다. 결과 형식은 아래 §`TEXT_SUMMARY` 의
+  세 번째 예시를 보세요.
+
 > **`/file` 은 검색할 폴더를 프론트가 고르지 않습니다.** 사용자가 PC 의 Agent 에서 등록해 둔
 > 폴더 중에서 **서버가 자동으로 고릅니다.** 요청에 넣을 값이 없고, `/file 보고서` 처럼 찾을
 > 말만 보내면 됩니다.
@@ -436,6 +468,10 @@ GET /api/v1/tasks?taskType=FILE_SEARCH&status=SUCCEEDED&deviceId=e0d6…&limit=2
 재시도마다 새로 만들면 중복 방지가 무력화되어 같은 작업이 두 번 실행됩니다.
 같은 키에 다른 본문을 보내면 `IDEMPOTENCY_CONFLICT` (409) 로 거부됩니다.
 보존 기간은 24시간입니다.
+
+`POST /api/v1/requests` 는 없어도 되지만, `POST /api/v1/tasks/text-summary/browser-result` 는
+**필수**입니다 — 없이 보내면 400 입니다. 그쪽은 재시도가 실행을 다시 트리거하는 게 아니라
+새 이력을 또 만드는 것으로 이어지기 때문입니다.
 
 ### `If-Match` 와 `ETag`
 
@@ -573,10 +609,17 @@ PC 실행기(Claude Code·Codex) — `selectedDeviceId` 로 고른 PC 가 요약
   "durationMs": 1820, "collectedAt": "2026-08-21T20:30:00+09:00" }
 ```
 
-> **위 세 결과의 `executionTarget` 은 서로 다릅니다.** CPU·GPU 는 `BACKEND`, PC 실행기는
-> `RUNNER` 입니다 — 어디서 실행했는지는 이 값으로, 무엇으로 했는지는 결과 안의
-> `engine`·`model`·`summaryAdapter` 로 가르세요. 앞으로 브라우저 WebLLM 이 열리면 그때
-> `executionTarget` 이 `BROWSER` 로도 갈라집니다. (slash-docs#3)
+브라우저 WebLLM — `POST /api/v1/tasks/text-summary/browser-result` 로 제출된 결과입니다.
+`executionTarget` 이 이때는 `BROWSER` 입니다.
+
+```json
+{ "summary": "…", "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+  "promptVersion": "v1", "durationMs": 2400 }
+```
+
+> **위 네 결과의 `executionTarget` 은 서로 다릅니다.** CPU·GPU 는 `BACKEND`, PC 실행기는
+> `RUNNER`, 브라우저 WebLLM 은 `BROWSER` 입니다 — 어디서 실행했는지는 이 값으로, 무엇으로
+> 했는지는 결과 안의 `engine`·`model`·`summaryAdapter`·`modelId` 로 가르세요. (slash-docs#3)
 
 #### `CODE_ANALYSIS`
 
@@ -703,6 +746,7 @@ Gemma 의 추론량과는 무관합니다.
 | `APPROVAL_REJECTED` | 422 | **사용자가 실행을 거절했습니다.** 실패이지만 잘못된 것은 없으니 오류처럼 붉게 보여 주지 마세요 — 사용자가 자기 선택을 문제로 읽습니다 |
 | `AGENT_REJECTED` | 422 | PC 가 작업을 받지 않음. 사유를 알 수 없을 때 옵니다 |
 | `AGENT_TASK_FAILED` | 422 | PC 에서 실행이 끝나지 못함. 사유를 알 수 없을 때 옵니다 |
+| `BROWSER_TASK_FAILED` | 422 | **브라우저 WebLLM 요약이 실패했다고 스스로 보고함**(`POST /tasks/text-summary/browser-result` 의 `status: FAILED`). `AGENT_TASK_FAILED` 와 같은 자리 — 실행 주체가 PC 대신 브라우저일 뿐입니다 |
 | `DEVICE_REVOKED` | 403 | **등록이 해제된 PC 입니다.** `FORBIDDEN` 과 달리 다시 시도할 여지가 없으니 재등록을 안내해 주세요 |
 
 > **`AGENT_REJECTED`·`AGENT_TASK_FAILED` 는 마지막 수단입니다.** PC 가 사유를 함께 보내면

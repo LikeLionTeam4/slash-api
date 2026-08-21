@@ -132,6 +132,14 @@ public enum ErrorCode {
     /** Agent 가 실행에 실패했는데 사유가 없거나 모르는 값. (참조 구현의 fallback) */
     AGENT_TASK_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "PC에서 작업을 끝내지 못했습니다."),
 
+    /**
+     * 브라우저(WebLLM)가 이미 실행한 작업이 실패로 끝났다고 스스로 보고함. (slash-docs#3)
+     *
+     * <p>{@code AGENT_TASK_FAILED} 와 같은 자리다 — 실행 주체가 PC 대신 브라우저일 뿐,
+     * "우리가 신뢰하는 실행기가 실패를 자체 보고했다"는 뜻은 같다.
+     */
+    BROWSER_TASK_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "브라우저에서 요약하지 못했습니다."),
+
     // ---------------------------------------------------------------------
     // 외부·내부 서비스
     // ---------------------------------------------------------------------
