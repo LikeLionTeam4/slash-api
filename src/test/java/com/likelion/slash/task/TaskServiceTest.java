@@ -57,6 +57,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -71,6 +72,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @SpringBootTest
 @Transactional
+@TestPropertySource(properties = "slash.summary.engine=GEMMA")
 class TaskServiceTest {
 
     @Autowired
@@ -791,7 +793,11 @@ class TaskServiceTest {
     // ------------------------------------------------------------------
 
     // ------------------------------------------------------------------
-    // 요약 경로
+    // 요약 경로 (Gemma)
+    //
+    // 이 클래스는 `slash.summary.engine=GEMMA` 로 고정해 둔다. 기본값은 CPU 추출 요약이라
+    // 그대로 두면 원장을 남기지 않아 아래 시험들이 무엇을 지키는지 알 수 없게 된다.
+    // CPU 경로는 ExtractiveSummaryRoutingTest 가 본다. (slash-docs#3)
     // ------------------------------------------------------------------
 
     @Test

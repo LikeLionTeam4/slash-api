@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -31,8 +32,17 @@ import org.springframework.transaction.PlatformTransactionManager;
  *
  * <p><b>여러 Pod 이 동시에 돌아도 안전하다.</b> 같은 Job 을 둘이 집어도
  * {@code markRunning} 이 하나만 통과하고, 결과 반영도 상태를 확인한 뒤에만 일어난다.
+ *
+ * <p><b>요약을 GPU 로 할 때만 만들어진다.</b> CPU 추출 요약은 원장({@code async_jobs})을
+ * 남기지 않는다 — 몇십 밀리초에 끝나 이어받을 것이 없기 때문이다. 그러면 이 스윕이 볼
+ * 것도 없다. (slash-docs#3)
+ *
+ * <p><b>과거 원장은 그대로 남는다.</b> GPU 로 접수해 둔 작업이 아직 끝나지 않은 채로 엔진을
+ * 바꾸면 그 작업을 마감할 것이 없어지므로, 되돌릴 때까지 남겨 두는 것이 맞다.
+ * 권장 순서 5번("Gemma 신규 유입 중단")까지 두 경로가 함께 살아 있어야 하는 이유다.
  */
 @Component
+@ConditionalOnProperty(name = "slash.summary.engine", havingValue = "GEMMA")
 public class LlmJobSweeper {
 
     private static final Logger log = LoggerFactory.getLogger(LlmJobSweeper.class);

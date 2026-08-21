@@ -29,6 +29,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +42,9 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @SpringBootTest
 @Transactional
+// 이 스윕은 GPU 요약 전용이다. CPU 추출 요약은 원장을 남기지 않아 스윕이 볼 것이 없고,
+// 기본값으로 두면 빈 자체가 만들어지지 않는다. (slash-docs#3)
+@TestPropertySource(properties = "slash.summary.engine=GEMMA")
 class LlmJobSweeperTest {
 
     @Autowired

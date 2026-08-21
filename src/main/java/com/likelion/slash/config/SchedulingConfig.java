@@ -7,7 +7,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 /**
  * 주기 작업 활성화.
  *
- * <p>지금 도는 것은 여덟 가지다.
+ * <p>지금 도는 것은 여덟 가지이고, 그중 <b>둘은 요약을 GPU 로 할 때만</b> 만들어진다
+ * ({@code slash.summary.engine=GEMMA}). 기본값인 CPU 추출 요약에서는 여섯 가지가 돈다.
  * <ul>
  *   <li>{@link com.likelion.slash.dispatch.PendingDispatchSweeper} — 미전달 작업 재발행</li>
  *   <li>{@link com.likelion.slash.dispatch.DispatchExpirySweeper} — 기한이 지난 전달 마감</li>
@@ -15,8 +16,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  *   <li>{@link com.likelion.slash.device.DeviceOfflineSweeper} — Heartbeat 가 끊긴 기기 내리기</li>
  *   <li>{@link com.likelion.slash.pairing.PairingRequestSweeper} — 기한이 지난 등록 요청 정리</li>
  *   <li>{@link com.likelion.slash.ws.WsSubscriptionStarter} — Pod 간 이벤트 구독 재시도</li>
- *   <li>{@link com.likelion.slash.llm.LlmJobSweeper} — 시작되지 못한 요약 재실행·기한 마감</li>
- *   <li>{@link com.likelion.slash.llm.LlmReadiness} — 요약 모델이 작업을 받을 수 있는지 확인</li>
+ *   <li>{@link com.likelion.slash.llm.LlmJobSweeper} — 시작되지 못한 요약 재실행·기한 마감
+ *       <b>(GPU 요약 전용)</b></li>
+ *   <li>{@link com.likelion.slash.llm.LlmReadiness} — 요약 모델이 작업을 받을 수 있는지 확인
+ *       <b>(GPU 요약 전용)</b></li>
  * </ul>
  *
  * <p><b>모든 Pod 이 동시에 돈다.</b> 주기 작업은 Pod 마다 따로 실행되므로,
