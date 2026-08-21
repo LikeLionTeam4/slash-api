@@ -7,8 +7,6 @@ import com.likelion.slash.nlu.dto.NluAnalyzeRequest;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -118,7 +116,19 @@ public class NluClient {
     /**
      * 입력을 NLU 요청 형태로 가른다.
      *
-     * <p>{@code /file 보고서 지난주} → {@code path=["file"]}, {@code operands=["보고서","지난주"]}
+     * <p>{@code /file 보고서 지난주} → {@code path=["file"]}, {@code operands=["보고서 지난주"]}
+     *
+     * <p><b>이름 뒤를 낱말로 쪼개지 않는다.</b> 예전에는 공백으로 전부 갈라 배열에 담았는데,
+     * 그러면 <b>원문의 줄바꿈과 연속 공백이 이 단계에서 사라진다.</b> 요약처럼 인자가 자유
+     * 텍스트인 명령은 그것이 곧 내용이라 되돌릴 수 없다 — NLU 가 다시 이어 붙여도 무엇으로
+     * 이어야 할지 알 수 없기 때문이다. (slash-nlu#13)
+     *
+     * <p>다른 명령은 달라지는 것이 없다. NLU 가 어차피 {@code operands} 를 이어 붙여 쓰므로
+     * {@code ["보고서","지난주"]} 든 {@code ["보고서 지난주"]} 든 같은 값이 된다. 일곱 유형을
+     * 모두 실측해 확인했다.
+     *
+     * <p><b>NLU 가 operands 를 낱낱이 해석하기 시작하면 이 전제가 깨진다.</b> 지금은 모두
+     * 이어 붙여 쓰지만, 자리마다 다른 뜻을 주는 명령이 생기면 계약을 다시 맞춰야 한다.
      *
      * <p>슬래시만 있고 이름이 없는 입력({@code "/"}, {@code "/ "})은 {@code path} 가 비어
      * NLU 가 거부하므로 자연어로 넘긴다. 그러면 {@code UNSUPPORTED} 로 정상 처리된다.
@@ -130,15 +140,28 @@ public class NluClient {
             return NluAnalyzeRequest.ofText(requestId.toString(), trimmed, now);
         }
 
-        List<String> tokens = new ArrayList<>(Arrays.asList(trimmed.substring(1).split("\\s+")));
-        tokens.removeIf(String::isBlank);
+        String withoutSlash = trimmed.substring(1);
+        int firstSpace = indexOfWhitespace(withoutSlash);
 
-        if (tokens.isEmpty()) {
+        String name = firstSpace < 0 ? withoutSlash : withoutSlash.substring(0, firstSpace);
+        if (name.isBlank()) {
             return NluAnalyzeRequest.ofText(requestId.toString(), trimmed, now);
         }
 
-        String name = tokens.get(0);
-        List<String> operands = tokens.subList(1, tokens.size());
-        return NluAnalyzeRequest.ofCommand(requestId.toString(), List.of(name), List.copyOf(operands), now);
+        // 이름 뒤는 통째로 하나의 operand 다. 낱말로 쪼개지 않는다.
+        String rest = firstSpace < 0 ? "" : withoutSlash.substring(firstSpace).strip();
+        List<String> operands = rest.isEmpty() ? List.of() : List.of(rest);
+
+        return NluAnalyzeRequest.ofCommand(requestId.toString(), List.of(name), operands, now);
+    }
+
+    /** 명령 이름이 끝나는 자리. 줄바꿈도 구분자로 본다 — {@code "/요약\n본문"} 도 갈라야 한다. */
+    private static int indexOfWhitespace(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            if (Character.isWhitespace(value.charAt(i))) {
+                return i;
+            }
+        }
+        return -1;
     }
 }

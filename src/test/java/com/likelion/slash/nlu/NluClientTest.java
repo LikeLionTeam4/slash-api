@@ -119,14 +119,41 @@ class NluClientTest {
     }
 
     @Test
-    @DisplayName("명령 뒤의 값들은 operands 로 갈라 넣는다")
-    void 명령_뒤의_값은_operands_로_간다() throws Exception {
+    @DisplayName("명령 뒤는 통째로 하나의 operand 다")
+    void 명령_뒤는_통째로_간다() throws Exception {
         nluClient.analyze(UUID.randomUUID(), "/file 보고서 지난주", SlashTime.now());
 
         JsonNode command = objectMapper.readTree(받은본문.get()).path("command");
         assertThat(command.path("path").get(0).asText()).isEqualTo("file");
-        assertThat(command.path("operands").get(0).asText()).isEqualTo("보고서");
-        assertThat(command.path("operands").get(1).asText()).isEqualTo("지난주");
+
+        // 낱말로 쪼개면 원문의 줄바꿈과 연속 공백이 이 단계에서 사라진다. NLU 는 어차피
+        // 이어 붙여 쓰므로 결과는 같고, 요약처럼 인자가 자유 텍스트인 명령만 달라진다.
+        assertThat(command.path("operands")).hasSize(1);
+        assertThat(command.path("operands").get(0).asText()).isEqualTo("보고서 지난주");
+    }
+
+    @Test
+    @DisplayName("여러 줄 원문의 줄바꿈이 살아 있다")
+    void 줄바꿈이_살아있다() throws Exception {
+        // 이것이 낱말로 쪼개지 않는 이유다. 요약은 인자가 곧 내용이라, 여기서 줄바꿈을
+        // 잃으면 NLU 가 다시 이어 붙여도 무엇으로 이어야 할지 알 수 없다. (slash-nlu#13)
+        nluClient.analyze(UUID.randomUUID(), "/summary 첫 문단이다.\n\n둘째 문단이다.", SlashTime.now());
+
+        JsonNode command = objectMapper.readTree(받은본문.get()).path("command");
+        assertThat(command.path("operands").get(0).asText())
+                .isEqualTo("첫 문단이다.\n\n둘째 문단이다.");
+    }
+
+    @Test
+    @DisplayName("명령 이름은 줄바꿈으로도 끊긴다")
+    void 이름은_줄바꿈으로도_끊긴다() throws Exception {
+        // 원문을 줄바꿈으로 시작해 붙여넣는 경우가 있다. 이름과 내용이 붙어 버리면
+        // 알 수 없는 명령이 된다.
+        nluClient.analyze(UUID.randomUUID(), "/summary\n요약할 내용이다.", SlashTime.now());
+
+        JsonNode command = objectMapper.readTree(받은본문.get()).path("command");
+        assertThat(command.path("path").get(0).asText()).isEqualTo("summary");
+        assertThat(command.path("operands").get(0).asText()).isEqualTo("요약할 내용이다.");
     }
 
     @Test
