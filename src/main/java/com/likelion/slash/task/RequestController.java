@@ -12,6 +12,7 @@ import com.likelion.slash.common.response.ApiResponse;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.jooq.tables.records.TaskEventsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
+import com.likelion.slash.task.dto.BrowserSummaryResultRequest;
 import com.likelion.slash.task.dto.CreateRequestRequest;
 import com.likelion.slash.task.dto.CreateRequestResponse;
 import com.likelion.slash.task.dto.TaskDetailResponse;
@@ -92,6 +93,32 @@ public class RequestController {
         return ResponseEntity.accepted()
                 .header("Location", accepted.statusUrl())
                 .body(ApiResponse.of(accepted));
+    }
+
+    /**
+     * 브라우저(WebLLM)가 이미 끝낸 요약 결과를 접수한다. (slash-docs#3 권장 순서 3번)
+     *
+     * <p>{@code POST /requests} 와 달리 실행하지 않는다 — 브라우저가 원문을 서버 밖에 둔 채
+     * 이미 요약을 끝냈고, 여기는 그 결과를 다른 실행 경로와 같은 모양의 작업 이력으로
+     * 남기는 자리다. 그래서 202 가 아니라 실행이 이미 끝난 상태({@code SUCCEEDED}·
+     * {@code FAILED})로 응답한다.
+     *
+     * @param idempotencyKey 필수. {@code POST /requests} 와 달리 재전송이 같은 결과를 다시
+     *                       계산하는 게 아니라 새 이력 한 줄을 또 만드는 것으로 이어지므로,
+     *                       없이 받으면 네트워크 재시도 한 번이 중복 이력으로 남는다.
+     */
+    @PostMapping("/tasks/text-summary/browser-result")
+    public ResponseEntity<ApiResponse<CreateRequestResponse>> submitBrowserSummaryResult(
+            @Valid @RequestBody BrowserSummaryResultRequest request,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
+
+        AuthenticatedUser user = authenticatedUserService.current();
+        CreateRequestResponse result = taskService.submitBrowserSummaryResult(user, request, idempotencyKey);
+
+        log.info("브라우저 요약 결과 접수 taskId={} status={} userId={}",
+                result.taskId(), result.status(), user.publicId());
+
+        return ResponseEntity.ok().body(ApiResponse.of(result));
     }
 
     /**

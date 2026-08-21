@@ -35,6 +35,7 @@ import com.likelion.slash.nlu.NluSummaryClient;
 import com.likelion.slash.nlu.SummaryOutcome;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
 import com.likelion.slash.nlu.dto.NluSummaryResponse;
+import com.likelion.slash.task.dto.BrowserSummaryResultRequest;
 import com.likelion.slash.task.dto.CreateRequestRequest;
 import com.likelion.slash.task.dto.CreateRequestResponse;
 import com.likelion.slash.weather.WeatherClient;
@@ -95,6 +96,9 @@ public class TaskService {
 
     /** 멱등 기록의 범위. 같은 키라도 다른 Endpoint 면 별개로 본다. */
     private static final String REQUEST_PATH = "/api/v1/requests";
+
+    /** 브라우저 요약 결과 제출의 멱등 범위. (slash-docs#3 권장 순서 3번) */
+    private static final String BROWSER_SUMMARY_RESULT_PATH = "/api/v1/tasks/text-summary/browser-result";
 
     /** 멱등 기록 보존 기간. (문서 3.4.6) */
     private static final Duration IDEMPOTENCY_RETENTION = Duration.ofHours(24);
@@ -192,7 +196,7 @@ public class TaskService {
                                         String idempotencyKey) {
 
         if (idempotencyKey != null) {
-            Optional<CreateRequestResponse> replayed = replay(user, idempotencyKey, request);
+            Optional<CreateRequestResponse> replayed = replay(user, idempotencyKey, REQUEST_PATH, requestHash(request));
             if (replayed.isPresent()) {
                 return replayed.get();
             }
@@ -203,7 +207,8 @@ public class TaskService {
         stateWriter.recordCreated(task.getId(), summarize(request.text()));
 
         if (idempotencyKey != null) {
-            Optional<CreateRequestResponse> winner = claimOrFollow(user, idempotencyKey, request, task);
+            Optional<CreateRequestResponse> winner =
+                    claimOrFollow(user, idempotencyKey, REQUEST_PATH, requestHash(request), task);
             if (winner.isPresent()) {
                 return winner.get();
             }
@@ -223,16 +228,21 @@ public class TaskService {
      * <p>같은 키 + 같은 본문이면 그때 만든 작업의 <b>현재</b> 상태를 돌려준다. 접수 당시의
      * 상태를 저장해 두었다가 그대로 되돌려주면, 재전송한 화면만 옛 상태를 보게 된다.
      *
+     * <p>요청 형태(레코드 타입)에 매이지 않도록 경로와 해시만 받는다 — 접수(
+     * {@code CreateRequestRequest})와 브라우저 요약 결과 제출({@link BrowserSummaryResultRequest})
+     * 이 같은 멱등 처리를 쓰되 서로 다른 경로·해시 규칙을 갖는다.
+     *
      * @return 재전송으로 판정했으면 그때의 작업, 처음 보는 키면 비어 있음
      * @throws SlashException 같은 키에 다른 본문이 왔을 때 {@link ErrorCode#IDEMPOTENCY_CONFLICT}
      */
     private Optional<CreateRequestResponse> replay(AuthenticatedUser user,
                                                    String idempotencyKey,
-                                                   CreateRequestRequest request) {
+                                                   String requestPath,
+                                                   String requestHash) {
 
-        return idempotencyRecordRepository.find(user.id(), idempotencyKey, REQUEST_PATH)
+        return idempotencyRecordRepository.find(user.id(), idempotencyKey, requestPath)
                 .map(record -> {
-                    if (!record.getRequestHash().equals(requestHash(request))) {
+                    if (!record.getRequestHash().equals(requestHash)) {
                         throw new SlashException(ErrorCode.IDEMPOTENCY_CONFLICT);
                     }
                     return taskRepository.findById(record.getTaskId())
@@ -255,14 +265,15 @@ public class TaskService {
      */
     private Optional<CreateRequestResponse> claimOrFollow(AuthenticatedUser user,
                                                           String idempotencyKey,
-                                                          CreateRequestRequest request,
+                                                          String requestPath,
+                                                          String requestHash,
                                                           TasksRecord task) {
 
         Optional<IdempotencyRecordsRecord> claimed = idempotencyRecordRepository.tryInsert(
                 user.id(),
                 idempotencyKey,
-                REQUEST_PATH,
-                requestHash(request),
+                requestPath,
+                requestHash,
                 task.getId(),
                 HttpStatus.ACCEPTED.value(),
                 SlashTime.now().plus(IDEMPOTENCY_RETENTION));
@@ -272,7 +283,7 @@ public class TaskService {
         }
 
         log.info("멱등 키 선점에 실패해 기존 작업을 따라간다 taskId={}", task.getPublicId());
-        return replay(user, idempotencyKey, request);
+        return replay(user, idempotencyKey, requestPath, requestHash);
     }
 
     /**
@@ -283,6 +294,122 @@ public class TaskService {
      */
     private String requestHash(CreateRequestRequest request) {
         return Sha256.hex(request.text().trim() + "\n" + request.selectedDeviceId());
+    }
+
+    /**
+     * 브라우저가 이미 끝낸 요약 결과를 받아 작업 이력에 남긴다. (slash-docs#3 권장 순서 3번)
+     *
+     * <p><b>여기는 접수({@link #accept})와 완전히 다른 입구다.</b> NLU 분석도, 실행 위치
+     * 결정도 하지 않는다 — 브라우저가 이미 {@code TEXT_SUMMARY} 를 {@code BROWSER} 에서
+     * 실행했다는 사실 자체가 입력이다. 남은 일은 그 결과를 다른 실행 경로와 같은 모양의
+     * 작업 이력 한 줄로 만드는 것뿐이다.
+     *
+     * <p><b>원문은 어디에도 없다.</b> {@code tasks.input_text} 는 NOT NULL 이라 값을 채워야
+     * 하지만, 실제 원문 대신 무엇이 있었는지만 적은 문구를 넣는다 — 그 열에 원문이 들어
+     * 있다고 나중에 오해하면 안 된다. 목록에 보여줄 {@code request_summary} 는 성공했으면
+     * 요약 결과 자체를 쓴다 — 사용자가 이력에서 "이게 무엇을 요약한 것인지" 알아볼 수
+     * 있어야 하고, 지금 가진 것 중 그 역할을 할 수 있는 것은 결과뿐이다.
+     *
+     * <p>{@code Idempotency-Key} 는 필수다. 접수({@code /requests})와 달리 재전송이 실행을
+     * 다시 트리거하지 않고 <b>새 이력 한 줄을 또 만드는 것</b>으로 이어지므로, 없이 받으면
+     * 네트워크 재시도 한 번이 중복 이력으로 남는다.
+     */
+    public CreateRequestResponse submitBrowserSummaryResult(AuthenticatedUser user,
+                                                             BrowserSummaryResultRequest request,
+                                                             String idempotencyKey) {
+
+        if (request.status() == BrowserSummaryResultRequest.Status.SUCCEEDED
+                && (request.summary() == null || request.summary().isBlank())) {
+            throw new SlashException(ErrorCode.VALIDATION_ERROR);
+        }
+
+        String requestHash = browserSummaryResultHash(request);
+
+        Optional<CreateRequestResponse> replayed =
+                replay(user, idempotencyKey, BROWSER_SUMMARY_RESULT_PATH, requestHash);
+        if (replayed.isPresent()) {
+            return replayed.get();
+        }
+
+        String placeholder = "[브라우저에서 직접 요약 · 원문 " + request.inputLength() + "자, 서버로 전송되지 않음]";
+        UUID correlationId = UUID.randomUUID();
+        TasksRecord task = taskRepository.create(user.id(), placeholder, correlationId);
+        stateWriter.recordCreated(task.getId(), "브라우저에서 계산한 요약 결과를 받았습니다.");
+
+        Optional<CreateRequestResponse> winner =
+                claimOrFollow(user, idempotencyKey, BROWSER_SUMMARY_RESULT_PATH, requestHash, task);
+        if (winner.isPresent()) {
+            return winner.get();
+        }
+
+        if (!stateWriter.move(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING, null,
+                "결과를 반영하고 있습니다.")) {
+            return currentStateOf(task.getId(), task.getPublicId());
+        }
+
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("inputLength", request.inputLength());
+        parameters.put("modelId", request.modelId());
+        parameters.put("promptVersion", request.promptVersion());
+
+        String requestSummary = request.status() == BrowserSummaryResultRequest.Status.SUCCEEDED
+                ? summarize(request.summary())
+                : placeholder;
+
+        boolean applied = stateWriter.applyAnalysisAndMove(
+                task.getId(),
+                TaskType.TEXT_SUMMARY,
+                ExecutionTarget.BROWSER,
+                null,
+                toJsonb(parameters),
+                requestSummary,
+                TaskStatus.QUEUED,
+                null,
+                "브라우저 요약 결과를 반영하고 있습니다.");
+
+        if (!applied) {
+            return currentStateOf(task.getId(), task.getPublicId());
+        }
+
+        stateWriter.move(task.getId(), TaskStatus.QUEUED, TaskStatus.RUNNING, null,
+                "브라우저 요약 결과를 반영하고 있습니다.");
+
+        if (request.status() == BrowserSummaryResultRequest.Status.FAILED) {
+            String message = request.errorMessage() != null && !request.errorMessage().isBlank()
+                    ? request.errorMessage()
+                    : ErrorCode.BROWSER_TASK_FAILED.defaultMessage();
+            stateWriter.fail(task.getId(), TaskStatus.RUNNING, ErrorCode.BROWSER_TASK_FAILED, message);
+            return currentStateOf(task.getId(), task.getPublicId());
+        }
+
+        stateWriter.succeed(task.getId(), toJsonb(browserSummaryResult(request)), "브라우저에서 요약했습니다.");
+        return currentStateOf(task.getId(), task.getPublicId());
+    }
+
+    /** 같은 요약 결과가 다시 오는지 판별할 해시. 원문이 없으니 결과 자체로 판별한다. */
+    private String browserSummaryResultHash(BrowserSummaryResultRequest request) {
+        return Sha256.hex(String.join("\n",
+                String.valueOf(request.inputLength()),
+                request.modelId(),
+                request.promptVersion(),
+                request.status().name(),
+                String.valueOf(request.summary())));
+    }
+
+    /**
+     * 화면이 그대로 읽을 수 있는 모양으로 옮긴다.
+     *
+     * <p>{@code summary} 는 다른 실행 경로의 결과와 같은 자리에 둔다 — 화면은 그 값만 그리므로
+     * 실행 위치가 달라져도 고칠 것이 없다. {@code engine} 은 두지 않는다. GPU·CPU 처럼 서버가
+     * 고른 것이 아니라 브라우저의 WebLLM 모델 자체가 그 역할이라, {@code modelId} 가 대신한다.
+     */
+    private Map<String, Object> browserSummaryResult(BrowserSummaryResultRequest request) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("summary", request.summary());
+        result.put("modelId", request.modelId());
+        result.put("promptVersion", request.promptVersion());
+        result.put("durationMs", request.durationMs());
+        return result;
     }
 
     /**
