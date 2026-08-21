@@ -17,6 +17,7 @@ import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.common.error.SlashException;
+import com.likelion.slash.device.DeviceCapabilityRepository;
 import com.likelion.slash.device.DeviceProjectWorkspaceRepository;
 import com.likelion.slash.device.DeviceRepository;
 import com.likelion.slash.device.DeviceSearchFolderRepository;
@@ -102,6 +103,7 @@ public class TaskService {
     private final TaskStateWriter stateWriter;
     private final IdempotencyRecordRepository idempotencyRecordRepository;
     private final DeviceRepository deviceRepository;
+    private final DeviceCapabilityRepository deviceCapabilityRepository;
     private final DeviceSearchFolderRepository deviceSearchFolderRepository;
     private final DeviceProjectWorkspaceRepository deviceProjectWorkspaceRepository;
     private final NluClient nluClient;
@@ -135,6 +137,7 @@ public class TaskService {
                        TaskStateWriter stateWriter,
                        IdempotencyRecordRepository idempotencyRecordRepository,
                        DeviceRepository deviceRepository,
+                       DeviceCapabilityRepository deviceCapabilityRepository,
                        DeviceSearchFolderRepository deviceSearchFolderRepository,
                        DeviceProjectWorkspaceRepository deviceProjectWorkspaceRepository,
                        NluClient nluClient,
@@ -154,6 +157,7 @@ public class TaskService {
         this.stateWriter = stateWriter;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.deviceRepository = deviceRepository;
+        this.deviceCapabilityRepository = deviceCapabilityRepository;
         this.deviceSearchFolderRepository = deviceSearchFolderRepository;
         this.deviceProjectWorkspaceRepository = deviceProjectWorkspaceRepository;
         this.nluClient = nluClient;
@@ -345,7 +349,7 @@ public class TaskService {
             return TaskStatus.NEEDS_CLARIFICATION;
         }
 
-        return switch (resolveExecutionTarget(taskType)) {
+        return switch (resolveExecutionTarget(user, taskType, selectedDeviceId)) {
             case RUNNER -> routeToDevice(user, task, taskType, nlu, selectedDeviceId);
             case BACKEND -> routeToBackend(task, taskType, nlu);
             // resolveExecutionTarget 이 아직 이 값을 내지 않는다. 도달하면 그쪽의 결함이다.
@@ -361,15 +365,33 @@ public class TaskService {
      * 알지 못하고, 요청에 실려 온 값을 그대로 믿으면 브라우저가 자기 결과를 PC 결과인 것처럼
      * 제출할 수 있다.
      *
-     * <p>지금은 작업 유형에서 그대로 파생된다. {@code TEXT_SUMMARY} 를 브라우저나 PC 로도
-     * 보내기 시작하면 여기에 사용자 선택·WebLLM 사용 가능 여부·PC 상태가 들어온다.
-     * <b>그때 갈라질 자리를 미리 만들어 둔 것이지 지금 갈라지는 것은 아니다.</b>
+     * <p>대부분은 작업 유형에서 그대로 파생된다. {@code TEXT_SUMMARY} 만 다르다 — PC 없이
+     * 브라우저나 서버에서도 실행되지만, 사용자가 PC 를 선택했고 그 PC 가 실제로 처리할 수
+     * 있다고 보고했으면(Claude Code·Codex 로컬 CLI) 그쪽으로 보낸다. (slash-docs#3 권장
+     * 순서 7번)
+     *
+     * <p><b>사용자가 PC 를 선택한 것만으로는 부족하다.</b> 오래된 실행기 버전이거나 로컬
+     * CLI 가 설치돼 있지 않으면 {@code device_capabilities} 에 보고가 없다 — 그때는 조용히
+     * 서버 경로로 넘어간다({@code BACKEND}), PC 를 강제하지 않는다.
      *
      * <p>{@code LLM_SERVICE} 가 {@code BACKEND} 로 오는 것은 GPU Gemma 도 서버가 실행하기
      * 때문이다. CPU 추출 요약과 같은 자리에 서지만 <b>무엇으로 실행했는지</b>는 작업 결과가
      * 구분한다.
+     *
+     * <p><b>재개 경로(`resumeAfterApproval`)는 이 메서드를 다시 부르지 않는다.</b> 승인
+     * 시점에 이미 정해서 {@code tasks.execution_target} 에 남겨 뒀으므로, 재개는 그 값을
+     * 그대로 읽는다 — 다시 판단하면 그 사이 PC 능력 보고가 바뀌었을 때 승인한 것과 다른
+     * 곳에서 실행될 수 있다.
      */
-    private ExecutionTarget resolveExecutionTarget(TaskType taskType) {
+    private ExecutionTarget resolveExecutionTarget(AuthenticatedUser user, TaskType taskType, UUID selectedDeviceId) {
+        if (taskType == TaskType.TEXT_SUMMARY && selectedDeviceId != null) {
+            boolean deviceSupportsSummary = deviceRepository.findByPublicIdAndUserId(selectedDeviceId, user.id())
+                    .filter(device -> deviceCapabilityRepository.supports(device.getId(), TaskType.TEXT_SUMMARY))
+                    .isPresent();
+            if (deviceSupportsSummary) {
+                return ExecutionTarget.RUNNER;
+            }
+        }
         return switch (taskType.processingRoute()) {
             case LOCAL_AGENT -> ExecutionTarget.RUNNER;
             case BACKEND_SERVICE, LLM_SERVICE -> ExecutionTarget.BACKEND;
@@ -559,7 +581,10 @@ public class TaskService {
      * 아무도 알아채지 못한다.
      *
      * <p>기기와 입력값은 승인 전에 이미 정해 두었으므로 <b>다시 고르지 않는다.</b> 다시 고르면
-     * 사용자가 승인한 PC 가 아닌 곳에서 실행될 수 있다.
+     * 사용자가 승인한 PC 가 아닌 곳에서 실행될 수 있다. 실행 위치도 마찬가지라
+     * {@link #resolveExecutionTarget} 을 다시 부르지 않고 승인 시점에 저장해 둔
+     * {@code tasks.execution_target} 을 그대로 읽는다 — {@code TEXT_SUMMARY} 처럼 PC 능력에
+     * 따라 갈리는 유형은 그 사이 보고가 바뀌면 다시 판단했을 때 승인한 것과 달라질 수 있다.
      */
     public TaskStatus resumeAfterApproval(TasksRecord task) {
         TaskType taskType = TaskType.valueOf(task.getTaskType());
@@ -576,7 +601,7 @@ public class TaskService {
             return TaskStatus.FAILED;
         }
 
-        return switch (resolveExecutionTarget(taskType)) {
+        return switch (ExecutionTarget.valueOf(task.getExecutionTarget())) {
             case RUNNER -> resumeOnDevice(task);
             case BACKEND -> resumeOnBackend(task, taskType, parameters);
             case BROWSER -> throw new IllegalStateException(
