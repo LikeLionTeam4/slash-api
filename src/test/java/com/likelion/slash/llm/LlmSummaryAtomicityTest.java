@@ -30,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 /**
@@ -42,6 +43,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
  * 바깥에 묻혀 무엇이 남았는지 볼 수 없다. 대신 만든 자료를 뒤에서 지운다.
  */
 @SpringBootTest
+// 원장과 Task 전이가 한 트랜잭션인지 보는 시험이라 GPU 경로가 전제다. CPU 추출 요약은
+// 원장을 남기지 않는다. (slash-docs#3)
+@TestPropertySource(properties = "slash.summary.engine=GEMMA")
 class LlmSummaryAtomicityTest {
 
     @Autowired

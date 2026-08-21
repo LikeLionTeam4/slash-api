@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -31,6 +32,15 @@ import org.springframework.transaction.PlatformTransactionManager;
  *
  * <p><b>여러 Pod 이 동시에 돌아도 안전하다.</b> 같은 Job 을 둘이 집어도
  * {@code markRunning} 이 하나만 통과하고, 결과 반영도 상태를 확인한 뒤에만 일어난다.
+ *
+ * <p><b>엔진과 무관하게 언제나 만들어진다.</b> CPU 추출 요약은 원장({@code async_jobs})을
+ * 새로 남기지 않지만, <b>GPU 로 접수해 둔 과거 원장은 남아 있다.</b> 전환 시점에 처리 중이던
+ * 작업이 그것이다. 이 스윕을 끄면 그 원장을 마감할 것이 없어져 {@code QUEUED} 인 채로
+ * 굳는다 — 나중에 되돌렸을 때 <b>이미 만료된 작업을 다시 돌리는 대상</b>이 된다.
+ * ({@link #restartStale} 은 Task 상태를 보지 않는다 · #59 리뷰)
+ *
+ * <p>다시 돌리는 것은 GPU 요약일 때만 한다. 모델이 없는데 다시 돌려 봐야 같은 실패를
+ * 반복하기 때문이다. <b>기한 마감은 언제나 한다.</b> (slash-docs#3)
  */
 @Component
 public class LlmJobSweeper {
@@ -41,7 +51,11 @@ public class LlmJobSweeper {
     private final TaskRepository taskRepository;
     private final TaskStateWriter stateWriter;
     private final LlmSummaryRunner runner;
-    private final LlmReadiness readiness;
+    /**
+     * GPU 요약을 쓸 때만 있는 빈이다. 없으면 다시 돌리지 않고 기한 마감만 한다.
+     * ({@code slash.summary.engine=GEMMA})
+     */
+    private final ObjectProvider<LlmReadiness> readiness;
     private final ObjectMapper objectMapper;
 
     /** 만료 마감을 원장과 Task 한 묶음으로 처리한다. 이유는 {@link LlmSummaryRunner} 와 같다. */
@@ -57,7 +71,7 @@ public class LlmJobSweeper {
                          TaskRepository taskRepository,
                          TaskStateWriter stateWriter,
                          LlmSummaryRunner runner,
-                         LlmReadiness readiness,
+                         ObjectProvider<LlmReadiness> readiness,
                          ObjectMapper objectMapper,
                          PlatformTransactionManager transactionManager,
                          @Value("${slash.llm.job-sweep.stale-after}") Duration staleAfter,
@@ -124,12 +138,19 @@ public class LlmJobSweeper {
 
     /** 시작되지 못한 작업을 다시 돌린다. */
     private void restartStale() {
+        // 요약을 CPU 로 하는 동안에는 다시 돌리지 않는다. 남아 있는 원장은 GPU 로 접수해 둔
+        // 것이라 모델 없이 되살릴 수 없다. 기한이 차면 위 만료 마감이 정리한다.
+        LlmReadiness ready = readiness.getIfAvailable();
+        if (ready == null) {
+            return;
+        }
+
         // 모델이 받을 수 없는 상태면 다시 돌려 봐야 같은 실패를 반복한다. GPU 가 꺼져 있는
         // 동안은 건드리지 않고 두었다가, 켜지면 그때 이어서 돌린다. 그 전에 기한이 차면
         // 위 만료 마감이 정리한다. (PR #44 리뷰)
-        if (!readiness.canAccept()) {
+        if (!ready.canAccept()) {
             log.debug("요약 모델이 작업을 받을 수 없어 재시도를 미룬다 reason={}",
-                    readiness.reason().orElse("UNKNOWN"));
+                    ready.reason().orElse("UNKNOWN"));
             return;
         }
 

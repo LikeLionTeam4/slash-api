@@ -7,6 +7,7 @@ import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.AiAgentProvider;
 import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.ExecutionTarget;
+import com.likelion.slash.common.enums.SummaryEngine;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
@@ -23,7 +24,10 @@ import com.likelion.slash.llm.LlmReadiness;
 import com.likelion.slash.llm.LlmSummaryEnqueuer;
 import com.likelion.slash.llm.LlmSummaryRunner;
 import com.likelion.slash.nlu.NluClient;
+import com.likelion.slash.nlu.NluSummaryClient;
+import com.likelion.slash.nlu.SummaryOutcome;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
+import com.likelion.slash.nlu.dto.NluSummaryResponse;
 import com.likelion.slash.task.dto.CreateRequestRequest;
 import com.likelion.slash.task.dto.CreateRequestResponse;
 import com.likelion.slash.weather.WeatherClient;
@@ -39,6 +43,7 @@ import java.util.UUID;
 import org.jooq.JSONB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -97,9 +102,17 @@ public class TaskService {
     private final TaskDispatcher taskDispatcher;
     private final ObjectMapper objectMapper;
     private final WeatherClient weatherClient;
-    private final LlmReadiness llmReadiness;
+    /**
+     * GPU 요약을 쓸 때만 있는 빈이다. CPU 추출 요약이 기본이 되면서 조건부가 됐다.
+     * ({@code slash.summary.engine=GEMMA} · slash-docs#3)
+     */
+    private final ObjectProvider<LlmReadiness> llmReadiness;
     private final LlmSummaryEnqueuer llmSummaryEnqueuer;
     private final LlmSummaryRunner llmSummaryRunner;
+    private final NluSummaryClient nluSummaryClient;
+
+    /** 요약을 무엇으로 할지. 실행할 때 고르는 값이라 설정으로 둔다. (slash-docs#3) */
+    private final SummaryEngine summaryEngine;
 
     /**
      * 요약 작업의 기한. 이 시각까지 끝나지 않으면 스윕이 마감한다.
@@ -119,9 +132,11 @@ public class TaskService {
                        TaskDispatcher taskDispatcher,
                        ObjectMapper objectMapper,
                        WeatherClient weatherClient,
-                       LlmReadiness llmReadiness,
+                       ObjectProvider<LlmReadiness> llmReadiness,
                        LlmSummaryEnqueuer llmSummaryEnqueuer,
                        LlmSummaryRunner llmSummaryRunner,
+                       NluSummaryClient nluSummaryClient,
+                       @Value("${slash.summary.engine}") SummaryEngine summaryEngine,
                        @Value("${slash.llm.job-deadline}") Duration summaryDeadline) {
         this.taskRepository = taskRepository;
         this.stateWriter = stateWriter;
@@ -130,6 +145,8 @@ public class TaskService {
         this.deviceSearchFolderRepository = deviceSearchFolderRepository;
         this.deviceProjectWorkspaceRepository = deviceProjectWorkspaceRepository;
         this.nluClient = nluClient;
+        this.nluSummaryClient = nluSummaryClient;
+        this.summaryEngine = summaryEngine;
         this.taskDispatcher = taskDispatcher;
         this.objectMapper = objectMapper;
         this.weatherClient = weatherClient;
@@ -358,11 +375,83 @@ public class TaskService {
     private TaskStatus routeToBackend(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
         return switch (taskType) {
             case WEATHER_LOOKUP -> routeToWeather(task, taskType, nlu);
-            case TEXT_SUMMARY -> routeToLlm(task, taskType, nlu);
+            case TEXT_SUMMARY -> switch (summaryEngine) {
+                case EXTRACTIVE -> routeToExtractiveSummary(task, taskType, nlu);
+                case GEMMA -> routeToLlm(task, taskType, nlu);
+            };
             case FILE_SEARCH, FILE_OPEN, SYSTEM_STATUS, CODE_ANALYSIS, AI_AGENT_USAGE ->
                     throw new IllegalStateException(
                             "PC 실행 작업이 서버 경로로 들어왔다. taskType=" + taskType);
         };
+    }
+
+    /**
+     * CPU 추출 요약을 한다. (slash-docs#3 권장 순서 3번)
+     *
+     * <p><b>날씨와 같은 모양이다.</b> 원장({@code async_jobs})을 두지 않고 곧바로 부른다 —
+     * 원문에서 문장을 고르는 일이라 몇십 밀리초에 끝나고, 실패해도 사용자가 다시 누르면
+     * 그만이라 남겨서 이어받을 것이 없다. Gemma 경로가 원장과 스윕을 두는 것은 모델이
+     * 수십 초를 쓰기 때문이고, 여기에는 그 이유가 없다.
+     *
+     * <p><b>{@link LlmReadiness} 를 보지 않는다.</b> 그것은 GPU 모델이 작업을 받을 수 있는지를
+     * 묻는 것이고, 이 경로는 GPU 를 쓰지 않는다.
+     *
+     * <p>입력 길이를 여기서 미리 확인하지 않는다. NLU 가 판정하고 이유를 코드로 돌려준다.
+     */
+    private TaskStatus routeToExtractiveSummary(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
+        Map<String, Object> parameters = new LinkedHashMap<>(nlu.parametersOrEmpty());
+
+        boolean applied = stateWriter.applyAnalysisAndMove(
+                task.getId(),
+                taskType,
+                ExecutionTarget.BACKEND,
+                null,
+                toJsonb(parameters),
+                summarize(task.getInputText()),
+                TaskStatus.QUEUED,
+                null,
+                "요약하고 있습니다.");
+
+        if (!applied) {
+            return currentStatusOf(task.getId());
+        }
+
+        stateWriter.move(task.getId(), TaskStatus.QUEUED, TaskStatus.RUNNING, null, "요약하고 있습니다.");
+
+        SummaryOutcome outcome = nluSummaryClient.summarize(
+                task.getCorrelationId(), task.getPublicId(),
+                String.valueOf(parameters.get(PARAMETER_TEXT)));
+
+        if (outcome instanceof SummaryOutcome.Failure failure) {
+            stateWriter.fail(task.getId(), TaskStatus.RUNNING, failure.errorCode(), failure.message());
+            return TaskStatus.FAILED;
+        }
+
+        SummaryOutcome.Success success = (SummaryOutcome.Success) outcome;
+        stateWriter.succeed(task.getId(), toJsonb(summaryResult(success.response())), "요약했습니다.");
+        return TaskStatus.SUCCEEDED;
+    }
+
+    /**
+     * 화면이 그대로 읽을 수 있는 모양으로 옮긴다.
+     *
+     * <p><b>{@code summary} 는 Gemma 결과와 같은 자리에 둔다.</b> 화면은 그 값만 그리므로
+     * 엔진이 바뀌어도 고칠 것이 없다.
+     *
+     * <p>나머지는 <b>무엇으로 요약했는지</b>다. 실행 위치({@code executionTarget})가 어디서
+     * 했는지만 나타내기로 했으므로, 그 안에서 Gemma 와 추출 요약을 가르는 것은 이 값들이다.
+     * (slash-docs#3 리뷰에서 확정한 경계)
+     */
+    private Map<String, Object> summaryResult(NluSummaryResponse response) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("summary", response.summary());
+        result.put("engine", response.engine());
+        result.put("algorithm", response.algorithm());
+        result.put("algorithmVersion", response.algorithmVersion());
+        result.put("inputSentenceCount", response.inputSentenceCount());
+        result.put("outputSentenceCount", response.outputSentenceCount());
+        result.put("durationMs", response.durationMs());
+        return result;
     }
 
     /**
@@ -543,9 +632,9 @@ public class TaskService {
     private TaskStatus routeToLlm(TasksRecord task, TaskType taskType, NluAnalyzeResponse nlu) {
         // 받을 수 없는 상태라면 원장을 만들지 않고 여기서 답한다. 만들어 두면 호출했다가
         // 실패로 마감하는 일을 반복하고, 사용자는 같은 말을 한참 뒤에 듣는다.
-        if (!llmReadiness.canAccept()) {
+        if (!llmReadiness.getObject().canAccept()) {
             log.info("요약 모델이 작업을 받을 수 없어 접수하지 않는다 taskId={} reason={}",
-                    task.getPublicId(), llmReadiness.reason().orElse("UNKNOWN"));
+                    task.getPublicId(), llmReadiness.getObject().reason().orElse("UNKNOWN"));
             stateWriter.fail(task.getId(), TaskStatus.ANALYZING, ErrorCode.LLM_NOT_READY,
                     "요약 모델이 아직 준비되지 않았습니다. 잠시 뒤 다시 시도해 주세요.");
             return TaskStatus.FAILED;

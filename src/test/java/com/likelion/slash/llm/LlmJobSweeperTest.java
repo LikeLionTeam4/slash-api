@@ -29,6 +29,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +42,9 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @SpringBootTest
 @Transactional
+// 다시 돌리는 것은 GPU 요약일 때만 한다. 기본값(CPU)에서는 LlmReadiness 빈이 없어
+// 재실행을 건너뛰므로, 그 동작은 CpuEngineSweepTest 가 따로 본다. (slash-docs#3)
+@TestPropertySource(properties = "slash.summary.engine=GEMMA")
 class LlmJobSweeperTest {
 
     @Autowired

@@ -5,6 +5,7 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,8 +23,16 @@ import org.springframework.stereotype.Component;
  * <p><b>모르는 동안에는 막지 않는다.</b> 기동 직후처럼 아직 한 번도 묻지 못했거나 slash-llm 에
  * 닿지 못한 경우는 "준비되지 않았다" 가 아니라 "모른다" 다. 그것으로 기능을 막으면 멀쩡한
  * 모델을 두고 요약이 거부된다. 그때는 통과시키고 실제 호출이 판단하게 둔다.
+ *
+ * <p><b>요약을 GPU 로 할 때만 만들어진다.</b> 기본값인 CPU 추출 요약은 이 모델을 쓰지 않으므로,
+ * 그대로 두면 30초마다 꺼져 있는 GPU 를 찌르며 실패를 기록한다. GPU 를 종료하는 것이
+ * 이 전환의 목적이라 그 낭비를 남겨 둘 이유가 없다. (slash-docs#3)
+ *
+ * <p>빈이 없으면 {@code TaskService} 도 이 값을 볼 일이 없다 — GEMMA 경로로만 들어오는
+ * 판정이기 때문이다.
  */
 @Component
+@ConditionalOnProperty(name = "slash.summary.engine", havingValue = "GEMMA")
 public class LlmReadiness {
 
     private static final Logger log = LoggerFactory.getLogger(LlmReadiness.class);

@@ -255,19 +255,22 @@ GET  /api/v1/tasks/{taskId}              → 200
 > 말씀해 주세요"** 로 안내해 주세요 — 사용자가 다시 말하면 되는 상황입니다. 날씨 서비스
 > 자체에 닿지 못하면 `UPSTREAM_UNAVAILABLE` (503) 이고, 이건 기다리는 수밖에 없습니다.
 
-> **`/summary` 는 PC 를 고르지 않습니다.** 서버 쪽 모델이 하는 일이라 등록된 PC 가 없어도
+> **`/summary` 는 PC 를 고르지 않습니다.** 서버가 하는 일이라 등록된 PC 가 없어도
 > 실행됩니다. `selectedDeviceId` 를 보내도 무시합니다.
 >
-> 접수 응답은 `QUEUED` 로 즉시 돌아오고 **모델이 생각하는 동안 기다리지 않습니다.**
-> 진행은 다른 작업과 똑같이 WSS·폴링으로 따라오시면 됩니다. 실측 3~4초쯤 걸립니다.
+> **접수 응답이 곧바로 `SUCCEEDED` 로 오는 경우가 생겼습니다.** GPU 모델 대신 CPU 추출
+> 요약을 쓰면 수십 밀리초에 끝나기 때문입니다(slash-docs#3). 예전처럼 `QUEUED` 로 온 뒤
+> 나중에 끝나는 경우도 있으니, **접수 응답의 `status` 를 그대로 믿고 그리시면 됩니다** —
+> 고정값이 아닙니다. 이미 `SUCCEEDED` 면 폴링할 것이 없습니다.
 >
-> 결과는 `{ "summary": "...", "model": "..." }` 입니다. `model` 은 어떤 모델이 만든
-> 요약인지 남긴 값이라 화면에 보여 줄 필요는 없습니다.
+> 결과는 `summary` 가 언제나 있고, **무엇으로 요약했는지가 함께 옵니다.** 화면은 `summary`
+> 만 그리면 되고 나머지는 이력·조사용입니다. 아래 §TEXT_SUMMARY 를 보세요.
 >
 > 요약할 내용이 짧으면 NLU 단계에서 `NEEDS_CLARIFICATION` 으로 되묻고, 그보다 긴데도
-> 모델이 거절하면 `INVALID_PARAMETERS` (422) 로 옵니다. 모델이 밀려 있으면
-> `LLM_NOT_READY`, 아예 닿지 못하면 `UPSTREAM_UNAVAILABLE` (둘 다 503) 이라
-> **잠시 뒤 다시 시도해 달라고** 안내해 주세요.
+> 요약할 수 없으면 `INVALID_PARAMETERS` (422) 로 옵니다 — **너무 짧다·너무 길다·요약할
+> 문장이 없다** 셋 다 이 코드이고 이유는 `message` 에 담깁니다. 서비스에 닿지 못하면
+> `UPSTREAM_UNAVAILABLE` (503) 이라 **잠시 뒤 다시 시도해 달라고** 안내해 주세요.
+> (GPU 경로를 쓰는 동안에는 모델이 밀렸을 때 `LLM_NOT_READY` (503) 도 옵니다)
 
 > **`/file` 은 검색할 폴더를 프론트가 고르지 않습니다.** 사용자가 PC 의 Agent 에서 등록해 둔
 > 폴더 중에서 **서버가 자동으로 고릅니다.** 요청에 넣을 값이 없고, `/file 보고서` 처럼 찾을
@@ -507,11 +510,27 @@ GET /api/v1/tasks?taskType=FILE_SEARCH&status=SUCCEEDED&deviceId=e0d6…&limit=2
 
 #### `TEXT_SUMMARY`
 
+**`summary` 만 그리시면 됩니다.** 나머지는 무엇으로 요약했는지를 남긴 값이라 화면에 보여 줄
+필요가 없습니다. 어느 쪽이 오든 `summary` 는 같은 자리에 있습니다.
+
+CPU 추출 요약 — 원문에서 중요한 문장을 고릅니다. 지금 기본값입니다.
+
+```json
+{ "summary": "사용자가 브라우저에서 평범한 말로 요청하면 …",
+  "engine": "EXTRACTIVE", "algorithm": "TFIDF_CENTROID", "algorithmVersion": "1",
+  "inputSentenceCount": 8, "outputSentenceCount": 3, "durationMs": 16 }
+```
+
+GPU 모델(Gemma) — 문장을 새로 만듭니다. 과거 이력에 남아 있습니다.
+
 ```json
 { "summary": "슬래시는 사용자가 브라우저에서 …", "model": "gemma3:4b" }
 ```
 
-`model` 은 어떤 모델이 만든 요약인지 남긴 값이라 화면에 보여 줄 필요는 없습니다.
+> **`executionTarget` 은 둘 다 `BACKEND` 입니다.** 그 값은 *어디서* 실행했는지만 나타냅니다
+> (§`processingRoute` 와 `executionTarget` 은 다릅니다). *무엇으로* 했는지는 결과 안의
+> `engine`·`model` 이 가릅니다. 앞으로 브라우저 WebLLM 이 열리면 그때 `executionTarget` 이
+> `BROWSER` 로 갈라집니다. (slash-docs#3)
 
 #### `CODE_ANALYSIS`
 
