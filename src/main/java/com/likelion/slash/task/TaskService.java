@@ -606,19 +606,74 @@ public class TaskService {
         return ready ? dispatchOrRelease(task.getId()) : next;
     }
 
-    /** 승인받은 서버 작업을 실행한다. 접수 직후와 같은 자리를 쓴다. */
+    /**
+     * 승인받은 서버 작업을 실행한다. 접수 직후와 같은 자리를 쓴다.
+     *
+     * <p><b>{@link #routeToBackend} 와 똑같이 갈라야 한다.</b> 한쪽만 고치면 사용자가 승인한
+     * 것과 다른 방법으로 실행된다 — 요약이 그렇다. {@code executionTarget} 은 둘 다
+     * {@code BACKEND} 이고 입력값 해시도 같아서 {@code matches()} 도 통과하므로,
+     * <b>엔진이 바뀐 것만 아무 데서도 걸리지 않는다.</b> (#60 리뷰)
+     */
     private TaskStatus resumeOnBackend(TasksRecord task, TaskType taskType, Map<String, Object> parameters) {
-        if (!stateWriter.move(task.getId(), TaskStatus.WAITING_FOR_APPROVAL, TaskStatus.QUEUED,
-                null, "승인을 받아 실행합니다.")) {
+        return switch (taskType) {
+            case WEATHER_LOOKUP -> {
+                if (!moveToQueued(task)) {
+                    yield currentStatusOf(task.getId());
+                }
+                yield executeWeather(task, parameters);
+            }
+            case TEXT_SUMMARY -> switch (summaryEngine) {
+                case EXTRACTIVE -> {
+                    if (!moveToQueued(task)) {
+                        yield currentStatusOf(task.getId());
+                    }
+                    yield executeExtractiveSummary(task, parameters);
+                }
+                // GPU 요약은 상태 전이와 원장을 한 트랜잭션으로 묶어야 해서 따로 간다.
+                case GEMMA -> resumeOnLlm(task, parameters);
+            };
+            case FILE_SEARCH, FILE_OPEN, SYSTEM_STATUS, CODE_ANALYSIS, AI_AGENT_USAGE ->
+                    throw new IllegalStateException(
+                            "PC 실행 작업이 서버 재개 경로로 들어왔다. taskType=" + taskType);
+        };
+    }
+
+    private boolean moveToQueued(TasksRecord task) {
+        return stateWriter.move(task.getId(), TaskStatus.WAITING_FOR_APPROVAL, TaskStatus.QUEUED,
+                null, "승인을 받아 실행합니다.");
+    }
+
+    /**
+     * 승인받은 GPU 요약을 맡긴다.
+     *
+     * <p>접수 직후와 달리 분석 결과를 다시 쓰지 않는다 — 물어보기 전에 이미 저장했고,
+     * 사용자가 본 것과 같아야 한다. 상태 전이와 원장 생성은 그때와 같이 한 트랜잭션이다.
+     */
+    private TaskStatus resumeOnLlm(TasksRecord task, Map<String, Object> parameters) {
+        if (!llmReadiness.getObject().canAccept()) {
+            log.info("요약 모델이 작업을 받을 수 없어 승인받은 작업을 실행하지 못한다 taskId={} reason={}",
+                    task.getPublicId(), llmReadiness.getObject().reason().orElse("UNKNOWN"));
+            stateWriter.fail(task.getId(), TaskStatus.WAITING_FOR_APPROVAL, ErrorCode.LLM_NOT_READY,
+                    "요약 모델이 아직 준비되지 않았습니다. 잠시 뒤 다시 시도해 주세요.");
+            return TaskStatus.FAILED;
+        }
+
+        JSONB input = toJsonb(parameters);
+        Optional<AsyncJobsRecord> job = llmSummaryEnqueuer.enqueueApproved(
+                task.getId(), input, SlashTime.now().plus(summaryDeadline));
+
+        if (job.isEmpty()) {
             return currentStatusOf(task.getId());
         }
 
-        return switch (taskType) {
-            case WEATHER_LOOKUP -> executeWeather(task, parameters);
-            case TEXT_SUMMARY -> executeExtractiveSummary(task, parameters);
-            default -> throw new IllegalStateException(
-                    "서버가 실행할 방법을 모르는 작업이다. taskType=" + taskType);
-        };
+        llmSummaryRunner.runAsync(
+                job.get().getId(),
+                task.getId(),
+                task.getCorrelationId(),
+                task.getPublicId(),
+                String.valueOf(parameters.get(PARAMETER_TEXT)));
+
+        return TaskStatus.QUEUED;
     }
 
     /** 저장해 둔 입력값을 읽는다. 승인 전에 굳혀 둔 것과 같은 값이어야 한다. */

@@ -57,11 +57,38 @@ public class LlmSummaryEnqueuer {
             return Optional.empty();
         }
 
+        return Optional.of(createLedger(taskId, input, deadlineAt));
+    }
+
+    /**
+     * 승인받은 요약을 접수한다. (P0-C)
+     *
+     * <p>{@link #enqueue} 와 갈라 둔 이유는 <b>시작 상태와 이미 저장된 것</b>이 다르기
+     * 때문이다. 접수 직후에는 {@code ANALYZING} 에서 분석 결과까지 함께 반영하지만, 승인
+     * 뒤에는 {@code WAITING_FOR_APPROVAL} 에서 시작하고 작업 유형·입력값·실행 위치는 이미
+     * 물어보기 전에 저장돼 있다 — 사용자가 본 것과 같아야 하므로 다시 쓰지 않는다.
+     *
+     * <p><b>한 트랜잭션이어야 하는 것은 같다.</b> 나눠 두면 그 사이의 실패가 원장 없는
+     * {@code QUEUED} Task 를 남기고, 스윕은 원장을 보고 도는 것이라 찾지 못한다.
+     *
+     * @return 만들어진 원장. 이미 다른 상태로 넘어간 Task 면 비어 있다.
+     */
+    @Transactional
+    public Optional<AsyncJobsRecord> enqueueApproved(long taskId, JSONB input, OffsetDateTime deadlineAt) {
+        if (!stateWriter.move(taskId, TaskStatus.WAITING_FOR_APPROVAL, TaskStatus.QUEUED,
+                null, "승인을 받아 요약을 맡겼습니다.")) {
+            return Optional.empty();
+        }
+
+        return Optional.of(createLedger(taskId, input, deadlineAt));
+    }
+
+    private AsyncJobsRecord createLedger(long taskId, JSONB input, OffsetDateTime deadlineAt) {
         AsyncJobsRecord job = asyncJobRepository.create(taskId, AsyncJobType.TEXT_SUMMARY, input, deadlineAt);
 
         // PENDING 은 "아직 아무에게도 맡기지 않은" 상태다. 지금은 SQS 없이 곧바로 부르므로
         // 맡긴 시점이 여기다. (SQS 로 옮기면 발행에 성공한 시점으로 옮겨 간다)
         asyncJobRepository.markQueued(job.getId());
-        return Optional.of(job);
+        return job;
     }
 }
