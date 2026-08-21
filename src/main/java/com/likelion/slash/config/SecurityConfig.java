@@ -30,12 +30,6 @@ public class SecurityConfig {
             "/actuator/info",
             // 의존 서비스 연결 점검. 배포 확인과 장애 조사에 사용한다.
             "/api/v1/health/**",
-            // Agent 등록은 기기 토큰을 받기 전 단계라 사용자 인증을 요구하지 않는다.
-            // 등록 코드와 Ed25519 서명으로 자체 검증한다.
-            "/api/v1/agent/pair",
-            "/api/v1/agent/pair/verify",
-            // 기기 Token 재발급도 사용자 인증이 아니라 기기 서명으로 증명한다. (메시지 스펙 §8.1 3단계)
-            "/api/v1/agent/sessions/refresh",
     };
 
     /**
@@ -67,8 +61,37 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /**
+     * Agent REST 전용 체인. {@code /ws/**}와 같은 이유로 분리한다(이슈 #15) — 여기 세 경로도
+     * 전부 기기 서명·기기 Token으로 자체 검증하지 Cognito JWT를 쓰지 않는다.
+     *
+     * <p>예전엔 이 세 경로를 메인 체인의 {@code PUBLIC_PATHS}(permitAll)에 넣어 두는 것으로
+     * 충분하다고 봤는데, 그건 착각이었다 — 메인 체인에 {@code oauth2ResourceServer}가 붙어
+     * 있으면 {@code Authorization: Bearer} 헤더가 있는 요청은 경로 인가 규칙(permitAll)에
+     * 닿기도 전에 그 필터가 가로채 JWT 파싱을 시도한다. {@code /agent/pair}류는 헤더 자체가
+     * 없어 통과했지만, {@code /agent/sessions/refresh}는 기기 Token을 정확히 그 헤더로 보내서
+     * 실제 Cognito 검증이 켜진 환경(dev 이상)에서는 매번 401(AUTH_REQUIRED)로 끊겼다 — 로컬
+     * 임시 인증만 쓰던 로컬 환경에서는 JwtDecoder 빈 자체가 없어 이 결함이 드러나지 않았다.
+     * 그 결과 기기 Token 갱신이 항상 실패해, 앱을 재시작할 때마다 재페어링이 필요했다.
+     */
     @Bean
     @Order(2)
+    SecurityFilterChain agentSecurityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .securityMatcher("/api/v1/agent/pair", "/api/v1/agent/pair/verify", "/api/v1/agent/sessions/refresh")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .httpBasic(basic -> basic.disable())
+                .formLogin(form -> form.disable())
+                .logout(logout -> logout.disable())
+                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
+
+        return http.build();
+    }
+
+    @Bean
+    @Order(3)
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             ApiAuthenticationEntryPoint authenticationEntryPoint,
