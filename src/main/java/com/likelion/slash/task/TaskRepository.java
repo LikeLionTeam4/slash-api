@@ -103,13 +103,17 @@ public class TaskRepository {
      * <p><b>여기서 빠진 열은 돌려받은 레코드에서 {@code null} 이다.</b> 목록 한 줄을 그리는 데
      * 필요한 것만 담는다 — 이 결과로 다른 일을 하려면 열을 늘리기보다 따로 조회하는 편이 낫다.
      *
+     * <p><b>{@code processing_route} 도 없다.</b> `#58` 이 이력 응답에서 그 값을 빼면서
+     * 목록을 그리는 데 쓰이지 않게 됐다. 열과 enum 은 아직 남아 있지만 여기서 읽을 이유가
+     * 없다. (`#69` 리뷰)
+     *
      * <p>{@code input_text} 는 남겨 둔다 — {@code request_summary} 가 비어 있을 때 목록 문구를
      * 그것으로 다시 만들기 때문이다({@link RequestSummary}). 요약 원문은 8,000자까지 들어올 수
      * 있어 이 열도 작지 않지만, 잘라 읽으면 자르는 규칙이 SQL 과 자바 두 곳에 생긴다.
      */
     private static final Field<?>[] HISTORY_COLUMNS = {
             TASKS.ID, TASKS.PUBLIC_ID, TASKS.DEVICE_ID, TASKS.INPUT_TEXT, TASKS.REQUEST_SUMMARY,
-            TASKS.TASK_TYPE, TASKS.PROCESSING_ROUTE, TASKS.EXECUTION_TARGET, TASKS.STATUS,
+            TASKS.TASK_TYPE, TASKS.EXECUTION_TARGET, TASKS.STATUS,
             TASKS.ERROR_CODE, TASKS.CREATED_AT, TASKS.COMPLETED_AT,
     };
 
