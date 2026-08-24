@@ -376,7 +376,7 @@ class TaskRepositoryTest {
 
         assertThat(한쪽).hasSize(1);
         // result 는 한 건에 64KB 까지 허용된다. 목록이 그리지 않는 값을 스무 줄씩 실어 나르면
-        // 결과가 큰 이력에서 조회가 8배 넘게 느려진다. (docs/load-test)
+        // 결과가 큰 이력에서 조회가 6배 넘게 느려진다. (docs/load-test)
         assertThat(한쪽.get(0).getResult()).isNull();
         assertThat(한쪽.get(0).getParameters()).isNull();
         // 목록을 그리는 데 필요한 값은 그대로 온다.

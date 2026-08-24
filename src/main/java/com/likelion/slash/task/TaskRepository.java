@@ -97,8 +97,8 @@ public class TaskRepository {
      * <p>{@link com.likelion.slash.task.dto.TaskSummaryResponse} 가 그 둘을 응답에 싣지 않는데
      * {@code select *} 로 읽으면 <b>DB 에서 꺼내 앱까지 옮긴 뒤 버린다.</b> {@code result} 는
      * {@code ck_tasks_result_size} 가 64KB 까지 허용하므로 스무 줄이면 최대 1.2MB 를 헛으로
-     * 나른다. 결과가 20KB 인 이력을 조회했을 때 처리량이 8.6배 차이 났다
-     * (2,350 → 274 RPS). 측정은 {@code docs/load-test} 에 있다.
+     * 나른다. 결과가 19KB 인 이력을 조회했을 때 처리량이 <b>6.2배</b> 차이 났다
+     * (375 → 2,344 RPS, 각 3회 측정). 측정은 {@code docs/load-test} 에 있다.
      *
      * <p><b>여기서 빠진 열은 돌려받은 레코드에서 {@code null} 이다.</b> 목록 한 줄을 그리는 데
      * 필요한 것만 담는다 — 이 결과로 다른 일을 하려면 열을 늘리기보다 따로 조회하는 편이 낫다.
