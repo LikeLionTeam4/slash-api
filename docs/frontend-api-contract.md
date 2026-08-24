@@ -158,8 +158,7 @@ Idempotency-Key: {UUID v4}
 
 GET  /api/v1/tasks/{taskId}              → 200
 { "data": { "taskId": "9c1e…", "status": "SUCCEEDED",
-            "taskType": "SYSTEM_STATUS", "processingRoute": "LOCAL_AGENT",
-            "executionTarget": "RUNNER",
+            "taskType": "SYSTEM_STATUS", "executionTarget": "RUNNER",
             "deviceId": "e0d6…", "inputText": "/status",
             "parameters": { … }, "result": { … }, "errorCode": null,
             "correlationId": "…", "createdAt": "…", "updatedAt": "…",
@@ -367,14 +366,13 @@ GET /api/v1/tasks?taskType=FILE_SEARCH&status=SUCCEEDED&deviceId=e0d6…&limit=2
         "completedAt": "2026-08-21T09:26:56.658342+09:00" },
 
       { "taskId": "4d3e979e-5b21-481b-9e5a-b401704a3f5b", "status": "SUCCEEDED",
-        "taskType": "WEATHER_LOOKUP", "processingRoute": "BACKEND_SERVICE",
-        "executionTarget": "BACKEND",
+        "taskType": "WEATHER_LOOKUP", "executionTarget": "BACKEND",
         "requestSummary": "오늘 서울 날씨 알려줘",
         "createdAt": "2026-08-21T09:26:25.287527+09:00",
         "completedAt": "2026-08-21T09:26:28.21623+09:00" },
 
       { "taskId": "db06a958-9301-45ea-86a6-7d52428b0d3a", "status": "SUCCEEDED",
-        "taskType": "TEXT_SUMMARY", "processingRoute": "LLM_SERVICE",
+        "taskType": "TEXT_SUMMARY",
         "requestSummary": "/summary 슬래시는 자연어로 내 컴퓨터를 다루는 서비스다. …",
         "createdAt": "2026-08-19T14:43:11.60227+09:00",
         "completedAt": "2026-08-19T14:43:12.644547+09:00" }
@@ -388,18 +386,24 @@ GET /api/v1/tasks?taskType=FILE_SEARCH&status=SUCCEEDED&deviceId=e0d6…&limit=2
 **맨 위 줄처럼 `taskType` 이 없는 항목이 옵니다.** 아직 분석되지 않았거나 무슨 말인지
 알아내지 못한 요청입니다. 갈래 뱃지를 그릴 때 값이 없는 경우를 다뤄 주세요.
 
-#### `processingRoute` 와 `executionTarget` 은 다릅니다
+#### 실행 위치는 `executionTarget` 하나로 읽습니다
 
-**"어디서 실행됐는지"를 화면에 보여줄 거라면 `executionTarget` 을 보세요.**
+**"어디서 실행됐는지"는 `executionTarget` 입니다.**
 
-| | 뜻 | 값 |
-|---|---|---|
-| `processingRoute` | 작업 유형에서 정해지는 상수. 유형이 같으면 언제나 같습니다 | `LOCAL_AGENT` · `BACKEND_SERVICE` · `LLM_SERVICE` |
-| `executionTarget` | **실제로 실행한 주체** | `RUNNER`(등록한 PC) · `BACKEND`(서버) · `BROWSER`(사용자 브라우저) |
+| 값 | 뜻 |
+|---|---|
+| `RUNNER` | 등록한 PC 의 실행기 |
+| `BACKEND` | 서버 |
+| `BROWSER` | 사용자 브라우저(WebLLM) |
 
-지금은 요약(`/summary`)만 빼면 두 값이 사실상 같습니다. 앞으로 **요약 하나가 브라우저·PC·서버
-셋 중 어디서든 실행**되기 때문에 갈라 두었습니다 — 그때부터는 같은 `TEXT_SUMMARY` 라도 건마다
-`executionTarget` 이 달라집니다. (slash-docs#3)
+> **`processingRoute` 는 이력 응답에서 빠졌습니다.** `GET /api/v1/tasks` 와
+> `GET /api/v1/tasks/{taskId}` 두 곳입니다. 작업 유형에서 파생된 상수라 실제 실행 위치를
+> 말해 주지 못했고, **요약이 브라우저·PC·서버 셋으로 갈라진 지금은 셋 다 `LLM_SERVICE` 로
+> 나가서** 읽는 쪽이 "GPU 서버가 했다" 로 오해할 수 있었습니다. 읽고 계셨다면
+> `executionTarget` 으로 옮겨 주세요. (slash-api#58 · slash-docs#3)
+>
+> 작업 유형 목록(`GET /api/v1/task-types`)의 `processingRoute` 는 그대로 둡니다. 그건 개별
+> 작업의 이력이 아니라 **유형의 속성**이고, NLU·실행기가 계약으로 참조합니다.
 
 > **오래된 작업에는 `executionTarget` 이 없습니다.** 이 값이 생기기 전에 접수된 작업은 실제로
 > 어디서 실행됐는지 서버가 기록해 두지 않았습니다. 지어내지 않고 비워 둔 것이라, 값이 없으면

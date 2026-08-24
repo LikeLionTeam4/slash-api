@@ -13,7 +13,10 @@ import java.util.UUID;
  *
  * <p>내부 PK 는 넣지 않는다. 기기도 {@code public_id} 로만 노출한다.
  *
- * @param processingRoute 작업 유형에서 파생된 상수. 유형이 같으면 언제나 같은 값이다
+ * <p><b>{@code processingRoute} 는 더 이상 싣지 않는다.</b> 이유는
+ * {@link TaskSummaryResponse} 에 적었다 — 실행 위치는 {@code executionTarget} 으로 읽는다.
+ * (#58 · slash-docs#3)
+ *
  * @param executionTarget 실제로 실행한 주체. V013 이전에 접수된 작업은 비어 있다
  * @param approval 실행 전 확인이 걸린 작업에만 있다. 화면은 이 값의 {@code version} 을
  *                 {@code If-Match} 로 되돌려 준다
@@ -25,7 +28,6 @@ public record TaskDetailResponse(
         UUID taskId,
         String status,
         String taskType,
-        String processingRoute,
         String executionTarget,
         UUID deviceId,
         String inputText,

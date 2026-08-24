@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import static com.likelion.slash.jooq.Tables.TASKS;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
@@ -68,6 +70,10 @@ class TaskHistoryControllerTest {
                 // 목록에는 결과도 입력값도 싣지 않는다
                 .andExpect(jsonPath("$.data.items[0].result").doesNotExist())
                 .andExpect(jsonPath("$.data.items[0].parameters").doesNotExist())
+                // 실행 위치는 executionTarget 하나로 읽는다. 유형에서 파생된 상수는
+                // 실제로 어디서 실행됐는지 말해 주지 못해 내보내지 않는다 (#58)
+                .andExpect(jsonPath("$.data.items[0].processingRoute").doesNotExist())
+                .andExpect(jsonPath("$.data.items[1].processingRoute").doesNotExist())
                 // 마지막 쪽이라 다음 표식이 없다
                 .andExpect(jsonPath("$.data.nextCursor").doesNotExist());
     }
@@ -285,5 +291,22 @@ class TaskHistoryControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.items.length()").value(0))
                 .andExpect(jsonPath("$.data.nextCursor").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("상세 응답에도 유형에서 파생된 상수는 싣지 않는다")
+    void 상세에는_processingRoute_가_없다() throws Exception {
+        long userId = 사용자(dsl, SUB);
+        long taskId = 분석된_작업(dsl, userId, null, TaskStatus.SUCCEEDED.name(),
+                TaskType.TEXT_SUMMARY, "이 글 요약해줘");
+        UUID 공개id = dsl.select(TASKS.PUBLIC_ID).from(TASKS)
+                .where(TASKS.ID.eq(taskId)).fetchOne(TASKS.PUBLIC_ID);
+
+        // 픽스처는 processing_route 를 채워 넣는다 — 열이 비어서 안 나오는 것이 아니라
+        // 응답이 그 열을 싣지 않는다는 것을 봐야 한다. (#58)
+        mockMvc.perform(get("/api/v1/tasks/" + 공개id).header("Authorization", 인증))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.taskType").value("TEXT_SUMMARY"))
+                .andExpect(jsonPath("$.data.processingRoute").doesNotExist());
     }
 }
