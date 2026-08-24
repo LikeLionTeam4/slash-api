@@ -169,6 +169,17 @@ public enum ErrorCode {
     UNSUPPORTED_SCHEMA_VERSION(HttpStatus.UNPROCESSABLE_ENTITY, "지원하지 않는 메시지 버전입니다."),
 
     /** 분류되지 않은 내부 오류 */
+    /**
+     * 운영이 잠가 둔 실행 경로. (slash-docs#3 보안 게이트)
+     *
+     * <p><b>{@link #TASK_TYPE_NOT_SUPPORTED} 와 다르다.</b> 저쪽은 그 PC 가 못 하는 일이고,
+     * 이쪽은 <b>할 수 있지만 서버가 지금 보내지 않기로 한 것</b>이다. 사용자가 PC 를 바꾸거나
+     * 실행기를 새로 깔아도 달라지지 않는다.
+     *
+     * <p>일시적인 상태라 503 이다 — 조건이 갖춰지면 설정만 바꿔 다시 열린다.
+     */
+    EXECUTION_PATH_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "지금은 이 작업을 실행할 수 없습니다."),
+
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "처리 중 문제가 발생했습니다.");
 
     /** Agent 가 보고할 수 있는 사유. 계약({@code contracts/src/enums.ts})의 {@code REASON_CODES} 와 같다. */

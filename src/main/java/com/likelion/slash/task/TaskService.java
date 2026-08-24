@@ -123,6 +123,7 @@ public class TaskService {
     private final LlmSummaryRunner llmSummaryRunner;
     private final NluSummaryClient nluSummaryClient;
     private final ApprovalPolicy approvalPolicy;
+    private final RunnerRoutingPolicy runnerRoutingPolicy;
     private final TaskApprovalService approvalService;
     private final TaskApprovalRepository approvalRepository;
 
@@ -153,6 +154,7 @@ public class TaskService {
                        LlmSummaryRunner llmSummaryRunner,
                        NluSummaryClient nluSummaryClient,
                        ApprovalPolicy approvalPolicy,
+                       RunnerRoutingPolicy runnerRoutingPolicy,
                        TaskApprovalService approvalService,
                        TaskApprovalRepository approvalRepository,
                        @Value("${slash.summary.engine}") SummaryEngine summaryEngine,
@@ -167,6 +169,7 @@ public class TaskService {
         this.nluClient = nluClient;
         this.nluSummaryClient = nluSummaryClient;
         this.approvalPolicy = approvalPolicy;
+        this.runnerRoutingPolicy = runnerRoutingPolicy;
         this.approvalService = approvalService;
         this.approvalRepository = approvalRepository;
         this.summaryEngine = summaryEngine;
@@ -476,7 +479,20 @@ public class TaskService {
             return TaskStatus.NEEDS_CLARIFICATION;
         }
 
-        return switch (resolveExecutionTarget(user, taskType, selectedDeviceId)) {
+        ExecutionTarget target = resolveExecutionTarget(user, taskType, selectedDeviceId);
+
+        // 서버 경로가 있는 유형은 resolveExecutionTarget 이 이미 그쪽으로 돌렸다.
+        // 여기 걸리는 것은 PC 밖에 갈 곳이 없는 유형이라 실행하지 않고 마감한다.
+        if (target == ExecutionTarget.RUNNER && runnerRoutingPolicy.isBlocked(taskType)) {
+            log.info("실행기 경로가 잠겨 있어 실행하지 않는다 taskId={} taskType={}",
+                    task.getPublicId(), taskType);
+            stateWriter.fail(task.getId(), TaskStatus.ANALYZING,
+                    ErrorCode.EXECUTION_PATH_DISABLED,
+                    "이 작업은 지금 실행할 수 없습니다. 잠시 뒤 다시 시도해 주세요.");
+            return TaskStatus.FAILED;
+        }
+
+        return switch (target) {
             case RUNNER -> routeToDevice(user, task, taskType, nlu, selectedDeviceId);
             case BACKEND -> routeToBackend(task, taskType, nlu);
             // resolveExecutionTarget 이 아직 이 값을 내지 않는다. 도달하면 그쪽의 결함이다.
@@ -497,6 +513,11 @@ public class TaskService {
      * 있다고 보고했으면(Claude Code·Codex 로컬 CLI) 그쪽으로 보낸다. (slash-docs#3 권장
      * 순서 7번)
      *
+     * <p><b>실행기 경로가 잠겨 있으면 PC 를 후보에서 뺀다.</b>
+     * ({@link RunnerRoutingPolicy} · slash-docs#3 보안 게이트) 요약은 서버에도 경로가 있어
+     * 잠가도 조용히 서버가 처리한다 — 사용자는 아무것도 잃지 않는다. PC 밖에 갈 곳이 없는
+     * 유형은 여기가 아니라 {@link #route} 에서 마감된다.
+     *
      * <p><b>사용자가 PC 를 선택한 것만으로는 부족하다.</b> 오래된 실행기 버전이거나 로컬
      * CLI 가 설치돼 있지 않으면 {@code device_capabilities} 에 보고가 없다 — 그때는 조용히
      * 서버 경로로 넘어간다({@code BACKEND}), PC 를 강제하지 않는다.
@@ -511,7 +532,8 @@ public class TaskService {
      * 곳에서 실행될 수 있다.
      */
     private ExecutionTarget resolveExecutionTarget(AuthenticatedUser user, TaskType taskType, UUID selectedDeviceId) {
-        if (taskType == TaskType.TEXT_SUMMARY && selectedDeviceId != null) {
+        if (taskType == TaskType.TEXT_SUMMARY && selectedDeviceId != null
+                && !runnerRoutingPolicy.isBlocked(taskType)) {
             boolean deviceSupportsSummary = deviceRepository.findByPublicIdAndUserId(selectedDeviceId, user.id())
                     .filter(device -> deviceCapabilityRepository.supports(device.getId(), TaskType.TEXT_SUMMARY))
                     .isPresent();

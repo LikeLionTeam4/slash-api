@@ -30,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
  * 가 보는 기본 경로와 겹치지 않게, 여기서는 PC 선택이 실제로 갈래를 바꾸는지만 본다.
  */
 @SpringBootTest
+@TestPropertySource(properties = "slash.runner.blocked-task-types=")
 @Transactional
 class SummaryRunnerRoutingTest {
 

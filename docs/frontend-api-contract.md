@@ -766,6 +766,7 @@ Gemma 의 추론량과는 무관합니다.
 | `LLM_NOT_READY` | 503 | AI 모델 준비 중 안내 |
 | `UPSTREAM_UNAVAILABLE` | 503 | 외부 서비스 문제 안내 |
 | `LOCATION_NOT_FOUND` | 422 | **날씨를 조회할 지역을 찾지 못함.** 503 과 달리 사용자가 다시 말하면 되는 상황이라 "시·군 이름으로 다시 말씀해 주세요" 로 안내해 주세요 |
+| `EXECUTION_PATH_DISABLED` | 503 | **운영이 잠가 둔 실행 경로입니다.** `TASK_TYPE_NOT_SUPPORTED`(그 PC 가 못 하는 일)와 달리 **할 수 있지만 서버가 지금 보내지 않는 것**이라, PC 를 바꾸거나 실행기를 새로 깔아도 달라지지 않습니다. "잠시 뒤 다시 시도해 주세요" 로 안내하고 **자동 재시도는 하지 마세요** — 조건이 갖춰져야 열립니다 |
 | `UNSUPPORTED_SCHEMA_VERSION` | 422 | 클라이언트 갱신 필요 |
 | `INTERNAL_ERROR` | 500 | 일반 오류 안내 + `requestId` 노출 |
 
