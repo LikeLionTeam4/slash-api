@@ -3,6 +3,7 @@ package com.likelion.slash.task;
 import static com.likelion.slash.jooq.Tables.DEVICES;
 import static com.likelion.slash.jooq.Tables.TASKS;
 import static com.likelion.slash.support.TestFixtures.사용자;
+import static com.likelion.slash.support.TestFixtures.작업;
 import static com.likelion.slash.support.TestFixtures.준비된_기기;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -10,7 +11,10 @@ import static org.mockito.BDDMockito.given;
 
 import com.likelion.slash.auth.AuthenticatedUser;
 import com.likelion.slash.common.SlashTime;
+import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.ExecutionTarget;
+import com.likelion.slash.common.enums.TaskStatus;
+import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.device.DeviceCapabilityRepository;
 import com.likelion.slash.dispatch.TaskDispatcher;
@@ -37,8 +41,9 @@ import org.springframework.transaction.annotation.Transactional;
  * {@code TEXT_SUMMARY} 를 PC 로 보내는 경로. (slash-docs#3 권장 순서 7번)
  *
  * <p>기본은 그대로 {@code BACKEND} 다 — PC 를 명시적으로 선택하고, 그 PC 가 실행기 능력으로
- * {@code TEXT_SUMMARY} 를 보고했을 때만 {@code RUNNER} 로 간다. {@link ExtractiveSummaryRoutingTest}
- * 가 보는 기본 경로와 겹치지 않게, 여기서는 PC 선택이 실제로 갈래를 바꾸는지만 본다.
+ * {@code TEXT_SUMMARY} 를 보고했고, <b>지금 받을 수 있을 때만</b> {@code RUNNER} 로 간다.
+ * {@link ExtractiveSummaryRoutingTest} 가 보는 기본 경로와 겹치지 않게, 여기서는 PC 선택이
+ * 실제로 갈래를 바꾸는지만 본다.
  */
 @SpringBootTest
 @Transactional
@@ -60,12 +65,13 @@ class SummaryRunnerRoutingTest {
     private TaskDispatcher taskDispatcher;
 
     private AuthenticatedUser 사용자;
+    private long userId;
     private long deviceId;
     private UUID 기기공개id;
 
     @BeforeEach
     void setUp() {
-        long userId = 사용자(dsl);
+        this.userId = 사용자(dsl);
         this.사용자 = new AuthenticatedUser(
                 userId, UUID.randomUUID(), "tester@example.com", "시험 사용자",
                 "Asia/Seoul", "ACTIVE", SlashTime.now());
@@ -118,6 +124,52 @@ class SummaryRunnerRoutingTest {
         deviceCapabilityRepository.replaceAll(deviceId, Set.of(TaskType.TEXT_SUMMARY));
 
         CreateRequestResponse 응답 = 요약을_요청한다(null);
+
+        TasksRecord 작업 = 작업조회(응답.taskId());
+        assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
+        assertThat(작업.getDeviceId()).isNull();
+    }
+
+    @Test
+    @DisplayName("능력을 보고했어도 그 PC 가 다른 작업 중이면 서버로 간다")
+    void 기기가_바쁘면_BACKEND_로_돌아온다() {
+        deviceCapabilityRepository.replaceAll(deviceId, Set.of(TaskType.TEXT_SUMMARY));
+        작업(dsl, userId, deviceId, TaskStatus.RUNNING.name());
+
+        CreateRequestResponse 응답 = 요약을_요청한다(기기공개id);
+
+        // 서버가 그 자리에서 할 수 있는 일이라 DEVICE_BUSY 로 마감하지 않는다.
+        // (시험 환경에는 요약 엔진이 없어 서버 실행 자체는 실패한다 — 보는 것은 갈래다)
+        TasksRecord 작업 = 작업조회(응답.taskId());
+        assertThat(작업.getErrorCode()).isNotEqualTo(ErrorCode.DEVICE_BUSY.name());
+        assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
+        assertThat(작업.getDeviceId()).isNull();
+    }
+
+    @Test
+    @DisplayName("능력을 보고했어도 그 PC 가 꺼져 있으면 기다리지 않고 서버로 간다")
+    void 기기가_꺼져_있으면_BACKEND_로_돌아온다() {
+        deviceCapabilityRepository.replaceAll(deviceId, Set.of(TaskType.TEXT_SUMMARY));
+        dsl.update(DEVICES).set(DEVICES.STATUS, DeviceStatus.OFFLINE.name())
+                .where(DEVICES.ID.eq(deviceId)).execute();
+
+        CreateRequestResponse 응답 = 요약을_요청한다(기기공개id);
+
+        // PC 가 켜질 때까지 WAITING_FOR_DEVICE 로 붙들려 있을 이유가 없다.
+        TasksRecord 작업 = 작업조회(응답.taskId());
+        assertThat(작업.getStatus()).isNotEqualTo(TaskStatus.WAITING_FOR_DEVICE.name());
+        assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
+        assertThat(작업.getDeviceId()).isNull();
+    }
+
+    @Test
+    @DisplayName("능력을 보고했어도 사용자가 작업 수신을 꺼 두었으면 서버로 간다")
+    void 수신을_꺼_두면_BACKEND_로_돌아온다() {
+        deviceCapabilityRepository.replaceAll(deviceId, Set.of(TaskType.TEXT_SUMMARY));
+        dsl.update(DEVICES).set(DEVICES.ACCEPTING_TASKS, false)
+                .where(DEVICES.ID.eq(deviceId)).execute();
+
+        CreateRequestResponse 응답 = 요약을_요청한다(기기공개id);
 
         TasksRecord 작업 = 작업조회(응답.taskId());
         assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());

@@ -501,6 +501,20 @@ public class TaskService {
      * CLI 가 설치돼 있지 않으면 {@code device_capabilities} 에 보고가 없다 — 그때는 조용히
      * 서버 경로로 넘어간다({@code BACKEND}), PC 를 강제하지 않는다.
      *
+     * <p><b>능력을 보고했더라도 지금 받을 수 없으면 마찬가지로 서버로 간다.</b> 꺼져 있거나,
+     * 수신을 꺼 두었거나, 다른 작업을 실행 중인 PC 가 그렇다. 여기를 보지 않으면 요약이
+     * {@code routeToDevice} 로 들어가 다른 PC 작업과 같은 취급을 받는다 — 바쁘면
+     * {@code DEVICE_BUSY} 로 마감되고, 꺼져 있으면 {@code WAITING_FOR_DEVICE} 로 PC 가
+     * 켜질 때까지 기다린다. <b>서버가 그 자리에서 할 수 있는 일인데 그렇게 된다.</b>
+     * {@code FILE_SEARCH} 처럼 PC 가 있어야만 되는 작업은 기다리거나 실패하는 것이 맞지만,
+     * <b>{@code TEXT_SUMMARY} 는 PC 와 서버 양쪽으로 갈 수 있는 유일한 작업이라</b> 한쪽이
+     * 막혔다고 멈출 이유가 없다. (slash-docs#3 권장 순서 7번)
+     *
+     * <p><b>여기서 본 것과 실제로 보내는 시점 사이는 완전히 막지 못한다.</b>
+     * {@link TaskRepository#isDeviceOccupied} 가 스냅샷이라 그 사이에 다른 요청이 PC 를
+     * 가져가면 요약도 {@code DEVICE_BUSY} 로 마감된다. 그 창을 없애려면 전달 경쟁에서 진
+     * 뒤에 서버로 돌리는 처리가 따로 필요한데, 지금은 창이 좁아 두고 본다.
+     *
      * <p>{@code LLM_SERVICE} 가 {@code BACKEND} 로 오는 것은 GPU Gemma 도 서버가 실행하기
      * 때문이다. CPU 추출 요약과 같은 자리에 서지만 <b>무엇으로 실행했는지</b>는 작업 결과가
      * 구분한다.
@@ -512,10 +526,12 @@ public class TaskService {
      */
     private ExecutionTarget resolveExecutionTarget(AuthenticatedUser user, TaskType taskType, UUID selectedDeviceId) {
         if (taskType == TaskType.TEXT_SUMMARY && selectedDeviceId != null) {
-            boolean deviceSupportsSummary = deviceRepository.findByPublicIdAndUserId(selectedDeviceId, user.id())
+            boolean runnerTakesIt = deviceRepository.findByPublicIdAndUserId(selectedDeviceId, user.id())
                     .filter(device -> deviceCapabilityRepository.supports(device.getId(), TaskType.TEXT_SUMMARY))
+                    .filter(TaskService::acceptsTask)
+                    .filter(device -> !taskRepository.isDeviceOccupied(device.getId()))
                     .isPresent();
-            if (deviceSupportsSummary) {
+            if (runnerTakesIt) {
                 return ExecutionTarget.RUNNER;
             }
         }

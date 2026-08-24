@@ -23,6 +23,12 @@ import org.springframework.stereotype.Component;
  * 읽기만 할 때와 고칠 수 있을 때가 다르고, 그 판단은 배포마다 다를 수 있다.
  * {@code TaskType} 에 박아 두면 그것을 바꾸는 데 배포가 필요하다.
  *
+ * <p><b>브라우저가 제출하는 요약 결과는 이 정책이 닿지 않는다.</b>
+ * {@code POST /api/v1/tasks/text-summary/browser-result} 는 실행을 시작하는 자리가 아니라
+ * 브라우저에서 <b>이미 끝난</b> 실행의 결과를 이력으로 남기는 자리라, 물어볼 시점이 지난
+ * 뒤다. {@code TEXT_SUMMARY} 를 이 목록에 넣어도 멈추는 것은 {@code POST /api/v1/requests}
+ * 로 들어온 요약뿐이다. (slash-docs#3 권장 순서 3번)
+ *
  * <p>목록에 없는 값을 적으면 <b>기동을 막지 않고 무시하며 경고만 남긴다.</b> 설정 오타 하나로
  * 서비스가 뜨지 않는 것보다, 승인이 걸리지 않는 것을 로그로 알리는 편이 낫다.
  */
