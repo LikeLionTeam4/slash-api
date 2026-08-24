@@ -203,13 +203,32 @@ docs/load-test/run.sh write 5 10 20 40
 셋을 받아 `meta`(매번 달라지는 `requestId`·`serverTime`)만 빼고 견주었다. **336줄이 완전히
 같다.** `request_summary` 가 빈 행이 `input_text` 로 대체되는 경로도 그대로다.
 
+## 동시성 정합성 — 빠른가 말고 틀리지 않는가
+
+처리량과 별개로 **동시에 들어올 때 결과가 어긋나지 않는지**를 봤다. 20건을 동시에 쏘는 방식이다.
+
+| 무엇 | 결과 | |
+|---|---|---|
+| 같은 `Idempotency-Key` 로 접수 | 응답은 1종류인데 **`tasks` 가 20건** | ❌ `#70` |
+| 같은 키로 브라우저 요약 결과 제출 | 같은 결함 (`#65` 도 같은 경로를 쓴다) | ❌ `#70` |
+| 같은 PC 로 서로 다른 요청 | `QUEUED` 1 + `DEVICE_BUSY` 19 · 전달 1건 | ✅ |
+
+**멱등은 응답에서만 지켜지고 저장에서는 아니다.** `accept()` 가 작업을 먼저 만든 뒤 키를
+선점해서, 경쟁에 진 요청이 만들어 둔 작업이 그대로 남는다. 사용자 이력 화면에 `CREATED`
+19줄이 그대로 보인다. 자세한 것은 `#70` 에 적었다.
+
+기기 경쟁은 `uk_dispatch_active_device` 와 `dispatchOrRelease` 가 설계대로 동작한다.
+
+> **기기 경쟁은 Agent 없이 재현되지 않는다.** WSS 연결이 없으면 하트비트 스윕이 기기를
+> `OFFLINE` 으로 내려 전부 `WAITING_FOR_DEVICE` 가 된다. `SLASH_SCHEDULING_ENABLED=false`
+> 로 스윕을 끄고 기기를 `READY` 로 되돌린 뒤에야 경쟁이 드러난다.
+
 ## 아직 재지 않은 것
 
 - **WSS 동시 접속** — 기기 수가 늘 때 `WsSessionRegistry`·Valkey Pub/Sub 이 어떻게 되는지
-- **기기당 동시 1건 경쟁** (`uk_dispatch_active_device`) — 같은 기기로 동시에 들어올 때
-- **멱등키 경쟁** — 같은 `Idempotency-Key` 동시 요청
 - **실제 Cognito JWT 검증 비용** — 로컬 임시 인증에는 없다
 - **접수 경로의 서버 몫 108ms 의 내역**
+- **dev 에서의 재측정** — 절대치는 이 기계의 것이다
 
 ## 다음
 
