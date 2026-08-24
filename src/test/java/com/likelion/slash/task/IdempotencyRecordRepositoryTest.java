@@ -104,9 +104,10 @@ class IdempotencyRecordRepositoryTest {
         idempotencyRecordRepository.tryInsert(userId, key, 경로, "hash-a",
                 작업(dsl, userId, null, TaskStatus.CREATED.name()), 202, SlashTime.now().plusHours(24));
 
-        int 지운_건수 = idempotencyRecordRepository.deleteExpired(SlashTime.now().plusHours(25));
+        idempotencyRecordRepository.deleteExpired(SlashTime.now().plusHours(25));
 
-        assertThat(지운_건수).isEqualTo(1);
+        // 지워진 건수를 세지 않는다. 이 배치는 표 전체를 도는 것이라, 로컬에서 앱을 띄워
+        // 남긴 기록이 있으면 그 수가 달라진다 — 시험이 개발용 자료에 흔들린다. (#47)
         assertThat(idempotencyRecordRepository.find(userId, key, 경로)).isEmpty();
     }
 }

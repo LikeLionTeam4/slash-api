@@ -123,9 +123,10 @@ class PairingRequestRepositoryTest {
         long userId = 사용자(dsl);
         var issued = pairingRequestRepository.issue(userId, 코드해시(), SlashTime.now().plusMinutes(5));
 
-        int 정리한_건수 = pairingRequestRepository.expireOverdue(SlashTime.now().plusMinutes(10));
+        pairingRequestRepository.expireOverdue(SlashTime.now().plusMinutes(10));
 
-        assertThat(정리한_건수).isEqualTo(1);
+        // 정리된 건수를 세지 않는다. 이 배치는 표 전체를 도는 것이라, 로컬에서 등록 코드를
+        // 발급해 둔 것이 있으면 그 수가 달라진다 — 시험이 개발용 자료에 흔들린다. (#47)
         assertThat(pairingRequestRepository.findByPublicIdAndUserId(issued.getPublicId(), userId))
                 .get()
                 .extracting(record -> record.getStatus())

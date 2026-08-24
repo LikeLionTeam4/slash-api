@@ -115,7 +115,9 @@ class LlmJobSweeperTest {
         sweeper.sweep();
 
         // 다시 돌려 봐야 같은 실패를 반복한다. 켜지면 그때 이어서 돌린다.
-        verify(runner, never()).runAsync(anyLong(), anyLong(), any(), any(), any());
+        // 이 작업이 다시 돌지 않았는지만 본다. anyLong() 으로 두면 표 전체를 도는 스윕이
+        // 로컬에 남은 다른 원장을 집었을 때도 걸린다 — 시험이 개발용 자료에 흔들린다. (#47)
+        verify(runner, never()).runAsync(anyLong(), eq(taskId), any(), any(), any());
         assertThat(원장조회(jobId).getStatus()).isEqualTo(AsyncJobStatus.QUEUED.name());
     }
 
@@ -127,7 +129,9 @@ class LlmJobSweeperTest {
         sweeper.sweep();
 
         // 실행이 이미 돌고 있을 수 있다. 여기서 또 집으면 같은 글을 두 번 요약한다.
-        verify(runner, never()).runAsync(anyLong(), anyLong(), any(), any(), any());
+        // 이 작업이 다시 돌지 않았는지만 본다. anyLong() 으로 두면 표 전체를 도는 스윕이
+        // 로컬에 남은 다른 원장을 집었을 때도 걸린다 — 시험이 개발용 자료에 흔들린다. (#47)
+        verify(runner, never()).runAsync(anyLong(), eq(taskId), any(), any(), any());
         assertThat(원장조회(jobId).getStatus()).isEqualTo(AsyncJobStatus.QUEUED.name());
     }
 

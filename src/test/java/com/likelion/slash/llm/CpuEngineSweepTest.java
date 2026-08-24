@@ -7,6 +7,7 @@ import static com.likelion.slash.support.TestFixtures.작업;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -117,7 +118,10 @@ class CpuEngineSweepTest {
 
         // 남아 있는 원장은 GPU 로 접수해 둔 것이라 모델 없이 되살릴 수 없다.
         // 돌려 봐야 같은 실패를 반복하고, 기한이 차면 위 시험처럼 마감된다.
-        verify(runner, never()).runAsync(anyLong(), anyLong(), any(), any(), any());
+        //
+        // 이 작업만 본다. anyLong() 으로 두면 표 전체를 도는 스윕이 로컬에 남은 다른
+        // 원장을 집었을 때도 걸린다. (#47)
+        verify(runner, never()).runAsync(anyLong(), eq(taskId), any(), any(), any());
         assertThat(원장조회(jobId).getStatus()).isEqualTo(AsyncJobStatus.QUEUED.name());
     }
 }
