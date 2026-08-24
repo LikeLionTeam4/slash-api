@@ -155,6 +155,19 @@ slash:
     # 두 경로가 함께 살아 있어야 해서다 — 과거 이력과 스윕이 그 사이에도 돌아야 한다.
     engine: ${SUMMARY_ENGINE:EXTRACTIVE}
 
+  text-summary:
+    # TEXT_SUMMARY 를 선택한 PC(RUNNER)로 보낼지. (slash-docs#3, 2026-08-24 보안 검토)
+    #
+    # 기본값은 false 다 — PC 쪽 요약 어댑터(Claude Code/Codex CLI 실행)가 지금 도구
+    # 화이트리스트(Read/Glob/Grep/MCP 미차단)만으로 방어하고 있어, 프롬프트 인젝션으로
+    # 임의 파일을 읽을 수 있는 경로가 남아 있다(slash-runner#44 조사에서 발견). OS 수준
+    # 격리(네트워크 차단·파일시스템 샌드박스)로 이중화되기 전까지는 이 경로를 열지 않는다.
+    #
+    # false 여도 TEXT_SUMMARY 자체는 막히지 않는다 — resolveExecutionTarget 이 BACKEND
+    # (CPU 추출 요약)로 대신 보낸다. 배포 없이 다시 켤 수 있게 코드가 아니라 설정으로
+    # 둔다(ApprovalPolicy 와 같은 이유).
+    runner-enabled: ${TEXT_SUMMARY_RUNNER_ENABLED:false}
+
   llm:
     # Helm 배포에서는 같은 Namespace 의 짧은 주소를 주입한다. Service 80 → 컨테이너 8000 이라
     # 주입값에는 포트가 없다. 이 기본값은 로컬에서만 쓰인다.

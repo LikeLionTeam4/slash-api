@@ -130,6 +130,15 @@ public class TaskService {
     private final SummaryEngine summaryEngine;
 
     /**
+     * {@code TEXT_SUMMARY} 를 선택한 PC(RUNNER)로 보낼지. 기본값은 {@code false} —
+     * PC 쪽 요약 어댑터(Claude Code/Codex CLI 실행)의 도구 차단이 아직 OS 수준으로
+     * 이중화되지 않아(slash-docs#3, 2026-08-24 보안 검토), 그 작업이 끝나기 전까지는
+     * 이 경로로 보내지 않는다. 배포 없이 다시 열 수 있게 코드에서 분기를 지우지 않고
+     * 설정으로 둔다 — {@link ApprovalPolicy} 와 같은 이유다.
+     */
+    private final boolean textSummaryRunnerEnabled;
+
+    /**
      * 요약 작업의 기한. 이 시각까지 끝나지 않으면 스윕이 마감한다.
      *
      * <p>전달 기한과 따로 두는 이유 — 전달은 켜져 있는 PC 에만 만들어 60초면 충분하지만,
@@ -156,7 +165,8 @@ public class TaskService {
                        TaskApprovalService approvalService,
                        TaskApprovalRepository approvalRepository,
                        @Value("${slash.summary.engine}") SummaryEngine summaryEngine,
-                       @Value("${slash.llm.job-deadline}") Duration summaryDeadline) {
+                       @Value("${slash.llm.job-deadline}") Duration summaryDeadline,
+                       @Value("${slash.text-summary.runner-enabled}") boolean textSummaryRunnerEnabled) {
         this.taskRepository = taskRepository;
         this.stateWriter = stateWriter;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
@@ -177,6 +187,7 @@ public class TaskService {
         this.llmSummaryEnqueuer = llmSummaryEnqueuer;
         this.llmSummaryRunner = llmSummaryRunner;
         this.summaryDeadline = summaryDeadline;
+        this.textSummaryRunnerEnabled = textSummaryRunnerEnabled;
     }
 
     // ------------------------------------------------------------------
@@ -511,7 +522,7 @@ public class TaskService {
      * 곳에서 실행될 수 있다.
      */
     private ExecutionTarget resolveExecutionTarget(AuthenticatedUser user, TaskType taskType, UUID selectedDeviceId) {
-        if (taskType == TaskType.TEXT_SUMMARY && selectedDeviceId != null) {
+        if (textSummaryRunnerEnabled && taskType == TaskType.TEXT_SUMMARY && selectedDeviceId != null) {
             boolean deviceSupportsSummary = deviceRepository.findByPublicIdAndUserId(selectedDeviceId, user.id())
                     .filter(device -> deviceCapabilityRepository.supports(device.getId(), TaskType.TEXT_SUMMARY))
                     .isPresent();

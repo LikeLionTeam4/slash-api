@@ -30,25 +30,23 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * {@code TEXT_SUMMARY} 를 PC 로 보내는 경로 — {@code slash.text-summary.runner-enabled=true} 일 때.
- * (slash-docs#3 권장 순서 7번)
+ * {@code slash.text-summary.runner-enabled} 의 기본값(꺼짐)이 실제로 지켜지는지.
+ * (slash-docs#3, 2026-08-24 보안 검토)
  *
- * <p>이 설정이 켜져 있으면, PC 를 명시적으로 선택하고 그 PC 가 실행기 능력으로
- * {@code TEXT_SUMMARY} 를 보고했을 때만 {@code RUNNER} 로 간다 — PC 선택이 실제로 갈래를
- * 바꾸는지가 이 시험의 대상이다. {@link ExtractiveSummaryRoutingTest} 가 보는 기본 경로와는
- * 겹치지 않는다. 기본값(꺼짐)일 때 항상 {@code BACKEND} 로 가는지는
- * {@link SummaryRunnerRoutingDisabledByDefaultTest} 에서 따로 본다 — 이 설정은 PC 쪽 요약
- * 어댑터의 도구 차단이 OS 수준으로 이중화되기 전까지 기본으로 꺼 둔다(2026-08-24 보안 검토).
+ * <p>PC 쪽 요약 어댑터(Claude Code/Codex CLI 실행)가 지금 도구 화이트리스트만으로 방어하고
+ * 있어, 프롬프트 인젝션으로 화이트리스트 밖 파일을 읽을 수 있는 경로가 남아 있다
+ * (slash-runner#44 조사에서 발견). OS 수준 격리로 이중화되기 전까지는, PC 가 요약 능력을
+ * 보고했고 사용자가 그 PC 를 골랐어도 {@code RUNNER} 로 가면 안 된다 — {@link
+ * SummaryRunnerRoutingTest} 와 반대로 이 클래스는 설정을 전혀 오버라이드하지 않는다
+ * (운영이 실제로 쓰는 기본값 그대로).
  */
 @SpringBootTest
-@TestPropertySource(properties = "slash.text-summary.runner-enabled=true")
 @Transactional
-class SummaryRunnerRoutingTest {
+class SummaryRunnerRoutingDisabledByDefaultTest {
 
     @Autowired
     private TaskService taskService;
@@ -87,45 +85,15 @@ class SummaryRunnerRoutingTest {
                         Map.of("text", "요약할 긴 글"), List.of(), null, 1.0, "SLASH"));
     }
 
-    private CreateRequestResponse 요약을_요청한다(UUID selectedDeviceId) {
-        return taskService.accept(사용자, new CreateRequestRequest("/summary 요약할 긴 글", selectedDeviceId), null);
-    }
-
-    private TasksRecord 작업조회(UUID taskId) {
-        return dsl.selectFrom(TASKS).where(TASKS.PUBLIC_ID.eq(taskId)).fetchOne();
-    }
-
     @Test
-    @DisplayName("PC 를 선택하고 그 PC 가 요약 능력을 보고했으면 PC 로 보낸다")
-    void 기기가_지원하면_RUNNER_로_간다() {
+    @DisplayName("설정을 켜지 않으면 PC 를 고르고 능력이 있어도 서버로 간다")
+    void 기본값에서는_기기가_지원해도_BACKEND_로_남는다() {
         deviceCapabilityRepository.replaceAll(deviceId, Set.of(TaskType.TEXT_SUMMARY));
 
-        CreateRequestResponse 응답 = 요약을_요청한다(기기공개id);
+        CreateRequestResponse 응답 =
+                taskService.accept(사용자, new CreateRequestRequest("/summary 요약할 긴 글", 기기공개id), null);
 
-        TasksRecord 작업 = 작업조회(응답.taskId());
-        assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.RUNNER.name());
-        assertThat(작업.getDeviceId()).isEqualTo(deviceId);
-    }
-
-    @Test
-    @DisplayName("PC 를 선택했어도 요약 능력을 보고한 적 없으면 조용히 서버로 간다")
-    void 기기가_미지원이면_BACKEND_로_남는다() {
-        // 능력 보고 자체가 없다 — 오래된 실행기 버전이거나 로컬 CLI 가 없는 경우.
-        CreateRequestResponse 응답 = 요약을_요청한다(기기공개id);
-
-        TasksRecord 작업 = 작업조회(응답.taskId());
-        assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
-        assertThat(작업.getDeviceId()).isNull();
-    }
-
-    @Test
-    @DisplayName("PC 를 고르지 않으면 능력이 있어도 서버로 간다")
-    void 기기를_안_고르면_BACKEND_로_남는다() {
-        deviceCapabilityRepository.replaceAll(deviceId, Set.of(TaskType.TEXT_SUMMARY));
-
-        CreateRequestResponse 응답 = 요약을_요청한다(null);
-
-        TasksRecord 작업 = 작업조회(응답.taskId());
+        TasksRecord 작업 = dsl.selectFrom(TASKS).where(TASKS.PUBLIC_ID.eq(응답.taskId())).fetchOne();
         assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
         assertThat(작업.getDeviceId()).isNull();
     }
