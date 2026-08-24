@@ -1,5 +1,6 @@
 package com.likelion.slash.task;
 
+import static com.likelion.slash.jooq.Tables.TASKS;
 import static com.likelion.slash.support.TestFixtures.분석된_작업;
 import static com.likelion.slash.support.TestFixtures.사용자;
 import static com.likelion.slash.support.TestFixtures.작업;
@@ -356,5 +357,31 @@ class TaskRepositoryTest {
         var 대상 = taskRepository.findOverdue(SlashTime.now().minusMinutes(1), 1000);
 
         assertThat(대상).extracting(record -> record.getId()).doesNotContain(방금_접수);
+    }
+
+    @Test
+    @DisplayName("이력 목록은 화면에 나가지 않는 큰 열을 읽지 않는다")
+    void 이력_목록은_결과와_입력값을_읽지_않는다() {
+        long userId = 사용자(dsl);
+        long taskId = 분석된_작업(dsl, userId, null, TaskStatus.SUCCEEDED.name(),
+                TaskType.TEXT_SUMMARY, "이 글 요약해줘");
+        // 값이 실제로 있는데도 안 읽는 것을 봐야 한다. 비어 있으면 무엇을 확인한 것이 아니다.
+        dsl.update(TASKS)
+                .set(TASKS.RESULT, JSONB.valueOf("{\"summary\":\"요약 결과\"}"))
+                .set(TASKS.PARAMETERS, JSONB.valueOf("{\"text\":\"원문\"}"))
+                .where(TASKS.ID.eq(taskId))
+                .execute();
+
+        var 한쪽 = taskRepository.findRecent(userId, TaskHistoryFilter.NONE, null, 10);
+
+        assertThat(한쪽).hasSize(1);
+        // result 는 한 건에 64KB 까지 허용된다. 목록이 그리지 않는 값을 스무 줄씩 실어 나르면
+        // 결과가 큰 이력에서 조회가 6배 넘게 느려진다. (docs/load-test)
+        assertThat(한쪽.get(0).getResult()).isNull();
+        assertThat(한쪽.get(0).getParameters()).isNull();
+        // 목록을 그리는 데 필요한 값은 그대로 온다.
+        assertThat(한쪽.get(0).getRequestSummary()).isEqualTo("이 글 요약해줘");
+        assertThat(한쪽.get(0).getTaskType()).isEqualTo(TaskType.TEXT_SUMMARY.name());
+        assertThat(한쪽.get(0).getCreatedAt()).isNotNull();
     }
 }

@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.jooq.Condition;
+import org.jooq.Field;
 import org.jooq.DSLContext;
 import org.jooq.JSONB;
 import org.jooq.impl.DSL;
@@ -91,6 +92,32 @@ public class TaskRepository {
     }
 
     /**
+     * 이력 목록이 실제로 쓰는 열. <b>{@code parameters} 와 {@code result} 는 일부러 뺐다.</b>
+     *
+     * <p>{@link com.likelion.slash.task.dto.TaskSummaryResponse} 가 그 둘을 응답에 싣지 않는데
+     * {@code select *} 로 읽으면 <b>DB 에서 꺼내 앱까지 옮긴 뒤 버린다.</b> {@code result} 는
+     * {@code ck_tasks_result_size} 가 64KB 까지 허용하므로 스무 줄이면 최대 1.2MB 를 헛으로
+     * 나른다. 결과가 19KB 인 이력을 조회했을 때 처리량이 <b>6.2배</b> 차이 났다
+     * (375 → 2,344 RPS, 각 3회 측정). 측정은 {@code docs/load-test} 에 있다.
+     *
+     * <p><b>여기서 빠진 열은 돌려받은 레코드에서 {@code null} 이다.</b> 목록 한 줄을 그리는 데
+     * 필요한 것만 담는다 — 이 결과로 다른 일을 하려면 열을 늘리기보다 따로 조회하는 편이 낫다.
+     *
+     * <p><b>{@code processing_route} 도 없다.</b> `#58` 이 이력 응답에서 그 값을 빼면서
+     * 목록을 그리는 데 쓰이지 않게 됐다. 열과 enum 은 아직 남아 있지만 여기서 읽을 이유가
+     * 없다. (`#69` 리뷰)
+     *
+     * <p>{@code input_text} 는 남겨 둔다 — {@code request_summary} 가 비어 있을 때 목록 문구를
+     * 그것으로 다시 만들기 때문이다({@link RequestSummary}). 요약 원문은 8,000자까지 들어올 수
+     * 있어 이 열도 작지 않지만, 잘라 읽으면 자르는 규칙이 SQL 과 자바 두 곳에 생긴다.
+     */
+    private static final Field<?>[] HISTORY_COLUMNS = {
+            TASKS.ID, TASKS.PUBLIC_ID, TASKS.DEVICE_ID, TASKS.INPUT_TEXT, TASKS.REQUEST_SUMMARY,
+            TASKS.TASK_TYPE, TASKS.EXECUTION_TARGET, TASKS.STATUS,
+            TASKS.ERROR_CODE, TASKS.CREATED_AT, TASKS.COMPLETED_AT,
+    };
+
+    /**
      * 최근 이력을 커서 방식으로 읽는다. ({@code idx_tasks_user_created})
      *
      * <p>OFFSET 을 쓰지 않으므로 목록을 넘기는 동안 새 작업이 생겨도 항목이 밀리거나 겹치지 않는다.
@@ -110,13 +137,14 @@ public class TaskRepository {
                 ? DSL.noCondition()
                 : DSL.row(TASKS.CREATED_AT, TASKS.ID).lt(cursor.createdAt(), cursor.id());
 
-        return dsl.selectFrom(TASKS)
+        return dsl.select(HISTORY_COLUMNS)
+                .from(TASKS)
                 .where(TASKS.USER_ID.eq(userId))
                 .and(afterCursor)
                 .and(matching(filter))
                 .orderBy(TASKS.CREATED_AT.desc(), TASKS.ID.desc())
                 .limit(limit)
-                .fetch();
+                .fetchInto(TASKS);
     }
 
     /**
