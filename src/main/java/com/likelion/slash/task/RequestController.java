@@ -154,7 +154,6 @@ public class RequestController {
                 task.getPublicId(),
                 task.getStatus(),
                 task.getTaskType(),
-                task.getProcessingRoute(),
                 task.getExecutionTarget(),
                 devicePublicId(task.getDeviceId()),
                 task.getInputText(),

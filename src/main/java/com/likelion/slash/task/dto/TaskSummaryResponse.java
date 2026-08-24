@@ -15,12 +15,17 @@ import java.util.UUID;
  *
  * <p>내부 PK 는 나가지 않는다. 기기도 공개 식별자로만 싣는다.
  *
+ * <p><b>{@code processingRoute} 는 더 이상 싣지 않는다.</b> 그 값은 작업 유형에서 파생된
+ * 상수라 실제로 어디서 실행됐는지를 말해 주지 못한다 — 요약이 브라우저·PC·서버 셋으로
+ * 갈라진 뒤로는 셋 다 {@code LLM_SERVICE} 로 나가서, 읽는 쪽이 "GPU 서버가 했다" 로
+ * 오해할 수 있다. 실행 위치는 {@code executionTarget} 하나로 읽는다. (#58 · slash-docs#3)
+ *
  * @param requestSummary  접수할 때 적어 둔 요약. 분석에 이르지 못하고 실패한 요청은 그 열이 비어
  *                        있어 원문에서 다시 만든다 — 목록에 빈 줄이 생기지 않게 하기 위해서다
  * @param taskType        분석 전이거나 분석에 실패했으면 없다
- * @param processingRoute 작업 유형에서 파생된 상수. 유형이 같으면 언제나 같은 값이다
  * @param executionTarget 실제로 실행한 주체. V013 이전에 접수된 작업은 비어 있다
- * @param deviceId        PC 를 거치지 않는 작업({@code /weather}·{@code /summary})은 없다
+ * @param deviceId        서버가 실행한 작업({@code /weather}, 서버 요약)은 없다. {@code /summary}
+ *                        는 선택한 PC 로 갈 수 있어 있을 수도 없을 수도 있다
  * @param errorCode       실패·만료일 때만 있다
  * @param completedAt     끝난 작업만 있다
  */
@@ -29,7 +34,6 @@ public record TaskSummaryResponse(
         UUID taskId,
         String status,
         String taskType,
-        String processingRoute,
         String executionTarget,
         UUID deviceId,
         String requestSummary,
@@ -47,7 +51,6 @@ public record TaskSummaryResponse(
                 task.getPublicId(),
                 task.getStatus(),
                 task.getTaskType(),
-                task.getProcessingRoute(),
                 task.getExecutionTarget(),
                 devicePublicId,
                 summary,
