@@ -24,7 +24,6 @@ import com.likelion.slash.device.DeviceSearchFolderRepository;
 import com.likelion.slash.dispatch.TaskDispatcher;
 import com.likelion.slash.jooq.tables.records.AsyncJobsRecord;
 import com.likelion.slash.jooq.tables.records.DevicesRecord;
-import com.likelion.slash.jooq.tables.records.IdempotencyRecordsRecord;
 import com.likelion.slash.jooq.tables.records.TaskApprovalsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
 import com.likelion.slash.llm.LlmReadiness;
@@ -54,7 +53,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 /**
@@ -206,24 +204,24 @@ public class TaskService {
                                         CreateRequestRequest request,
                                         String idempotencyKey) {
 
+        String requestHash = requestHash(request);
+
         if (idempotencyKey != null) {
-            Optional<CreateRequestResponse> replayed = replay(user, idempotencyKey, REQUEST_PATH, requestHash(request));
+            Optional<CreateRequestResponse> replayed = replay(user, idempotencyKey, REQUEST_PATH, requestHash);
             if (replayed.isPresent()) {
                 return replayed.get();
             }
         }
 
         UUID correlationId = UUID.randomUUID();
-        TasksRecord task = taskRepository.create(user.id(), request.text(), correlationId);
-        stateWriter.recordCreated(task.getId(), summarize(request.text()));
+        Optional<TasksRecord> created = stateWriter.create(
+                user.id(), request.text(), correlationId, summarize(request.text()),
+                claimOf(idempotencyKey, REQUEST_PATH, requestHash));
 
-        if (idempotencyKey != null) {
-            Optional<CreateRequestResponse> winner =
-                    claimOrFollow(user, idempotencyKey, REQUEST_PATH, requestHash(request), task);
-            if (winner.isPresent()) {
-                return winner.get();
-            }
+        if (created.isEmpty()) {
+            return followWinner(user, idempotencyKey, REQUEST_PATH, requestHash);
         }
+        TasksRecord task = created.get();
 
         if (!stateWriter.move(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING, null, "요청 분석 시작")) {
             return currentStateOf(task.getId(), task.getPublicId());
@@ -263,38 +261,32 @@ public class TaskService {
                 });
     }
 
+    /** 작업을 만들면서 함께 선점할 키. 헤더가 없으면 선점할 것이 없다. */
+    private IdempotencyClaim claimOf(String idempotencyKey, String requestPath, String requestHash) {
+        return idempotencyKey == null
+                ? null
+                : new IdempotencyClaim(idempotencyKey, requestPath, requestHash,
+                        SlashTime.now().plus(IDEMPOTENCY_RETENTION));
+    }
+
     /**
-     * 멱등 기록을 선점한다.
+     * 같은 키를 다른 요청이 먼저 선점했을 때 그 쪽 작업을 따라간다.
      *
-     * <p>두 요청이 같은 순간에 도착하면 {@code uk_idempotency_scope} 가 한 쪽만 남긴다.
-     * 진 쪽은 방금 만든 작업을 버리고 이긴 쪽의 작업을 따라간다.
-     *
-     * <p>버려진 작업은 {@code CREATED} 로 남는다. 지우지 않는 이유는 그 사이 다른 곳에서
-     * 참조했을 수 있어서다. 미완료 작업 만료 배치가 정리한다.
-     *
-     * @return 경쟁에서 졌으면 이긴 쪽의 작업, 선점했으면 비어 있음
+     * <p>여기 왔다는 것은 {@code uk_idempotency_scope} 가 이미 커밋된 기록을 막았다는 뜻이라,
+     * 그 기록은 반드시 읽힌다. 그래서 비어 있는 경우를 정상 흐름으로 다루지 않는다 — 24시간
+     * 보존 기간이 그 찰나에 만료돼 배치가 지운 것 같은, 설명되지 않는 상태다.
      */
-    private Optional<CreateRequestResponse> claimOrFollow(AuthenticatedUser user,
-                                                          String idempotencyKey,
-                                                          String requestPath,
-                                                          String requestHash,
-                                                          TasksRecord task) {
+    private CreateRequestResponse followWinner(AuthenticatedUser user,
+                                               String idempotencyKey,
+                                               String requestPath,
+                                               String requestHash) {
 
-        Optional<IdempotencyRecordsRecord> claimed = idempotencyRecordRepository.tryInsert(
-                user.id(),
-                idempotencyKey,
-                requestPath,
-                requestHash,
-                task.getId(),
-                HttpStatus.ACCEPTED.value(),
-                SlashTime.now().plus(IDEMPOTENCY_RETENTION));
-
-        if (claimed.isPresent()) {
-            return Optional.empty();
-        }
-
-        log.info("멱등 키 선점에 실패해 기존 작업을 따라간다 taskId={}", task.getPublicId());
-        return replay(user, idempotencyKey, requestPath, requestHash);
+        log.info("멱등 키 선점에 실패해 기존 작업을 따라간다 userId={} path={}", user.id(), requestPath);
+        return replay(user, idempotencyKey, requestPath, requestHash)
+                .orElseThrow(() -> {
+                    log.warn("선점에 실패했는데 이긴 쪽 기록이 없다 userId={} path={}", user.id(), requestPath);
+                    return new SlashException(ErrorCode.INTERNAL_ERROR);
+                });
     }
 
     /**
@@ -344,14 +336,14 @@ public class TaskService {
 
         String placeholder = "[브라우저에서 직접 요약 · 원문 " + request.inputLength() + "자, 서버로 전송되지 않음]";
         UUID correlationId = UUID.randomUUID();
-        TasksRecord task = taskRepository.create(user.id(), placeholder, correlationId);
-        stateWriter.recordCreated(task.getId(), "브라우저에서 계산한 요약 결과를 받았습니다.");
+        Optional<TasksRecord> created = stateWriter.create(
+                user.id(), placeholder, correlationId, "브라우저에서 계산한 요약 결과를 받았습니다.",
+                claimOf(idempotencyKey, BROWSER_SUMMARY_RESULT_PATH, requestHash));
 
-        Optional<CreateRequestResponse> winner =
-                claimOrFollow(user, idempotencyKey, BROWSER_SUMMARY_RESULT_PATH, requestHash, task);
-        if (winner.isPresent()) {
-            return winner.get();
+        if (created.isEmpty()) {
+            return followWinner(user, idempotencyKey, BROWSER_SUMMARY_RESULT_PATH, requestHash);
         }
+        TasksRecord task = created.get();
 
         if (!stateWriter.move(task.getId(), TaskStatus.CREATED, TaskStatus.ANALYZING, null,
                 "결과를 반영하고 있습니다.")) {
