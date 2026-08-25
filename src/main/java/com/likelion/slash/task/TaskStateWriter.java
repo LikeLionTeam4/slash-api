@@ -4,14 +4,18 @@ import com.likelion.slash.common.enums.ExecutionTarget;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
+import com.likelion.slash.jooq.tables.records.IdempotencyRecordsRecord;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
 import com.likelion.slash.ws.UserEventPublisher;
 import java.util.Optional;
+import java.util.UUID;
 import org.jooq.JSONB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 /**
  * 상태 전이와 타임라인 기록을 한 트랜잭션으로 묶는다. (WBS W1-04)
@@ -33,13 +37,16 @@ public class TaskStateWriter {
 
     private final TaskRepository taskRepository;
     private final TaskEventRepository taskEventRepository;
+    private final IdempotencyRecordRepository idempotencyRecordRepository;
     private final UserEventPublisher userEvents;
 
     public TaskStateWriter(TaskRepository taskRepository,
                            TaskEventRepository taskEventRepository,
+                           IdempotencyRecordRepository idempotencyRecordRepository,
                            UserEventPublisher userEvents) {
         this.taskRepository = taskRepository;
         this.taskEventRepository = taskEventRepository;
+        this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.userEvents = userEvents;
     }
 
@@ -64,10 +71,55 @@ public class TaskStateWriter {
         userEvents.taskResultAvailable(task.getUserId(), task.getPublicId(), terminal, task.getResult());
     }
 
-    /** 접수 직후의 최초 기록. 아직 전이가 아니므로 이전 상태는 없다. */
+    /**
+     * 작업을 만들고 최초 기록을 남기며 멱등 키까지 한 트랜잭션에서 선점한다.
+     *
+     * <p><b>셋을 따로 하면 유령 작업이 남는다.</b> 같은 키로 동시에 들어온 요청이 각자 작업을
+     * 만든 뒤 선점에서만 갈리면, 진 쪽이 만든 작업이 그대로 남아 사용자 이력에 보인다. 응답은
+     * 하나를 가리키는데 이력은 요청 수만큼 늘어나고, 그 유령들은 {@code CREATED} 라 미완료
+     * 스윕이 나중에 {@code EXPIRED} 로 마감해 이력에 영구히 남는다. (#70)
+     *
+     * <p>선점하지 못하면 이 트랜잭션을 통째로 되돌린다. {@code tasks} 행도
+     * {@code task_events} 행도 애초에 없었던 것이 된다 — <b>지우는 것이 아니라 만들지
+     * 않는 것</b>이라 "작업 행은 삭제하지 않는다" 는 전제를 깨지 않는다.
+     *
+     * <p>여기까지만 묶는다. 뒤따르는 NLU 호출은 트랜잭션 밖이다(클래스 주석 참고).
+     * <b>이 메서드가 트랜잭션의 최외곽이라는 전제</b>로 되돌림을 표시만 해 둔다 — 접수 경로
+     * 어디에도 바깥 트랜잭션이 없다.
+     *
+     * @param message 최초 기록에 남길 문구. 아직 전이가 아니므로 이전 상태는 없다
+     * @param claim   함께 선점할 멱등 키. {@code null} 이면 선점 없이 만들기만 한다
+     * @return 만든 작업. 같은 키를 다른 요청이 먼저 선점했으면 비어 있음
+     */
     @Transactional
-    public void recordCreated(long taskId, String message) {
-        taskEventRepository.append(taskId, null, TaskStatus.CREATED, null, message);
+    public Optional<TasksRecord> create(long userId,
+                                        String inputText,
+                                        UUID correlationId,
+                                        String message,
+                                        IdempotencyClaim claim) {
+
+        TasksRecord task = taskRepository.create(userId, inputText, correlationId);
+        taskEventRepository.append(task.getId(), null, TaskStatus.CREATED, null, message);
+
+        if (claim == null) {
+            return Optional.of(task);
+        }
+
+        Optional<IdempotencyRecordsRecord> claimed = idempotencyRecordRepository.tryInsert(
+                userId,
+                claim.key(),
+                claim.requestPath(),
+                claim.requestHash(),
+                task.getId(),
+                // 접수는 언제나 202 다. 두 입구(요청 접수·브라우저 결과 제출) 모두 같다.
+                HttpStatus.ACCEPTED.value(),
+                claim.expiresAt());
+
+        if (claimed.isEmpty()) {
+            TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            return Optional.empty();
+        }
+        return Optional.of(task);
     }
 
     /**

@@ -15,8 +15,8 @@ import java.util.UUID;
  * @param taskId 외부 노출용 {@code tasks.public_id}. 내부 PK 가 아니다.
  * @param from   이전 상태. <b>계약이 {@code null} 을 허용하지 않는다</b> — 비워 보내면 Agent 가
  *               아니라 브라우저의 zod 검증에서 프레임 <b>전체</b>가 조용히 버려져 화면이
- *               갱신되지 않는다. 이전 상태가 없는 최초 기록({@code recordCreated})은 애초에
- *               이 이벤트를 보내지 않는다.
+ *               갱신되지 않는다. 이전 상태가 없는 최초 기록({@code TaskStateWriter.create})은
+ *               애초에 이 이벤트를 보내지 않는다.
  */
 public record TaskStatusChangedEvent(
         String type,
