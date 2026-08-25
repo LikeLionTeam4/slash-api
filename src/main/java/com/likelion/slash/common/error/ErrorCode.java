@@ -57,6 +57,15 @@ public enum ErrorCode {
      */
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "대상을 찾을 수 없습니다."),
 
+    /** 그 주소가 받지 않는 HTTP 메서드 */
+    METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "이 주소에서 지원하지 않는 방식입니다."),
+
+    /** 요청 본문의 {@code Content-Type} 을 다룰 수 없음 */
+    UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "지원하지 않는 요청 형식입니다."),
+
+    /** {@code Accept} 가 요구하는 형식으로 응답할 수 없음 */
+    NOT_ACCEPTABLE(HttpStatus.NOT_ACCEPTABLE, "요청한 형식으로 응답할 수 없습니다."),
+
     /** If-Match 의 ETag 와 현재 자원 버전이 다름 */
     RESOURCE_VERSION_MISMATCH(HttpStatus.PRECONDITION_FAILED,
             "다른 곳에서 먼저 수정되었습니다. 새로고침 후 다시 시도해 주세요."),

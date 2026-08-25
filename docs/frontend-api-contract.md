@@ -732,6 +732,12 @@ Gemma 의 추론량과는 무관합니다.
 | `RESOURCE_NOT_FOUND` | 404 | **다른 사용자의 자원도 404** 로 옵니다. 403 을 기대하지 마세요 |
 | `RESOURCE_VERSION_MISMATCH` | 412 | 재조회 후 다시 시도 |
 | `IDEMPOTENCY_CONFLICT` | 409 | 같은 멱등키에 다른 본문 |
+| `METHOD_NOT_ALLOWED` | 405 | 그 주소가 받지 않는 메서드입니다. **재시도하지 마세요** |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | `Content-Type` 을 `application/json` 으로 보내세요. **재시도하지 마세요** |
+| `NOT_ACCEPTABLE` | 406 | `Accept` 가 JSON 을 허용하지 않습니다. **재시도하지 마세요** |
+
+> 위 셋과 없는 주소(404)는 **보내는 쪽을 고치지 않으면 몇 번을 보내도 같습니다.** 예전에는
+> 이것들이 500 으로 나가서 재시도해도 될 것처럼 보였습니다(`#74`).
 
 ### 기기·작업
 
