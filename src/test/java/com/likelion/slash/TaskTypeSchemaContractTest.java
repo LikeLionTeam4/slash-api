@@ -77,6 +77,29 @@ class TaskTypeSchemaContractTest {
                 .containsExactlyInAnyOrderElementsOf(이름_목록(ProcessingRoute.values()));
     }
 
+    /**
+     * {@code AGENT_CAPABILITIES} 와 {@code ck_device_capabilities_task_type} 대조. (#9)
+     *
+     * <p>위 둘과 달리 <b>전체 목록이 아니라 부분집합</b>이라 따로 본다. 실행기가 처리할 수
+     * 있는 것만 여기 들어간다 — {@code WEATHER_LOOKUP} 은 서버만 하므로 빠진다.
+     *
+     * <p>{@link TaskType} 이 주석으로 두 번("이 목록은 …과 같아야 한다") 약속해 두었는데 그것을
+     * 지키는지 보는 곳이 없었다. <b>어긋나면 Agent 가 READY 로 보고한 능력을 저장하는 순간
+     * 제약 위반으로 실패한다</b>({@code DeviceCapabilityRepository.replaceAll}) — 자바만 고치면
+     * 시험은 다 통과하고 실행기를 붙여야 드러나는 종류다.
+     */
+    @Test
+    @DisplayName("실행기가 보고할 수 있는 작업과 device_capabilities 허용 목록이 같다")
+    void 실행기_능력_목록이_db_허용_목록과_같다() {
+        List<String> 실행기가_보고할_수_있는_것 = Arrays.stream(TaskType.values())
+                .filter(TaskType::isAgentCapability)
+                .map(Enum::name)
+                .toList();
+
+        assertThat(제약이_허용하는_값("ck_device_capabilities_task_type"))
+                .containsExactlyInAnyOrderElementsOf(실행기가_보고할_수_있는_것);
+    }
+
     @Test
     @DisplayName("모든 작업 유형이 처리 경로와 함께 실제로 저장된다")
     void 모든_작업_유형이_저장된다() {
