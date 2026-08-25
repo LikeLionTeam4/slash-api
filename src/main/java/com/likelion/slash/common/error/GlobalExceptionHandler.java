@@ -86,6 +86,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception e) {
+        if (e instanceof org.springframework.web.ErrorResponse spring
+                && spring.getStatusCode().is4xxClientError()) {
+            return handleRequestError(spring);
+        }
+
         // 분류되지 않은 오류만 스택트레이스를 남긴다.
         log.error("처리하지 못한 오류", e);
 
@@ -93,5 +98,46 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(code.httpStatus())
                 .body(ErrorResponse.of(code, code.defaultMessage()));
+    }
+
+    /**
+     * Spring MVC 가 상태까지 정해 둔 요청 오류를 그 판단대로 내보낸다. (#74)
+     *
+     * <p>허용하지 않는 메서드·형식이나 없는 경로는 <b>보내는 쪽 잘못</b>인데, 여기서 갈라내지
+     * 않으면 위 catch-all 로 떨어져 500 이 된다. 5xx 는 "서버가 잘못했으니 다시 보내면 될
+     * 수도 있다" 는 뜻이라, {@code Content-Type} 이 틀린 요청처럼 몇 번을 보내도 같은 것에
+     * 쓰면 거짓말이 된다. <b>오타 URL 하나가 500 으로 집계되어</b> 5xx 알림이 오탐을 내고,
+     * catch-all 이 스택트레이스까지 남기는 문제도 함께 있었다.
+     *
+     * <p><b>예외를 하나씩 적지 않는다.</b> Spring 이 아는 요청 오류가 전부
+     * {@code org.springframework.web.ErrorResponse} 를 구현하므로, 새 종류가 생겨도 다시
+     * 빠지지 않는다. 이름이 우리 {@link ErrorResponse} 와 같아 여기서만 전체 이름을 쓴다.
+     *
+     * <p>4xx 만 가로챈다. 5xx 를 담고 오는 것은 정말 서버 잘못이라 스택트레이스가 필요하다.
+     */
+    private ResponseEntity<ErrorResponse> handleRequestError(org.springframework.web.ErrorResponse e) {
+        ErrorCode code = requestErrorCode(e.getStatusCode().value());
+        log.info("요청을 받을 수 없다: {} → {}", e.getClass().getSimpleName(), code.name());
+
+        return ResponseEntity
+                .status(code.httpStatus())
+                .body(ErrorResponse.of(code, code.defaultMessage()));
+    }
+
+    /**
+     * 모르는 4xx 는 {@code VALIDATION_ERROR}(400) 로 본다.
+     *
+     * <p><b>Spring 이 준 상태를 그대로 흘리지 않는다.</b> 짝이 되는 오류 코드가 없으면 프론트가
+     * 분기할 것이 없고, 계약 문서 §4 의 코드-상태 짝과도 어긋난다. 없는 코드를 지어내는
+     * 것보다 "요청이 잘못됐다" 로 좁히는 편이 낫다.
+     */
+    private ErrorCode requestErrorCode(int status) {
+        return switch (status) {
+            case 404 -> ErrorCode.RESOURCE_NOT_FOUND;
+            case 405 -> ErrorCode.METHOD_NOT_ALLOWED;
+            case 406 -> ErrorCode.NOT_ACCEPTABLE;
+            case 415 -> ErrorCode.UNSUPPORTED_MEDIA_TYPE;
+            default -> ErrorCode.VALIDATION_ERROR;
+        };
     }
 }
