@@ -139,12 +139,34 @@ jobs:
     needs: [test, container-build, publish-image]
     runs-on: ubuntu-latest
     steps:
+      # 이 워크플로가 도는 사이 dev 에 새 커밋이 들어왔으면 태그를 밀지 않는다. (#77)
+      #
+      # 아래 push 재시도는 rebase 후 **자기 태그를 다시 밀기** 때문에, 그냥 두면 커밋
+      # 시각이 아니라 "늦게 끝난 워크플로" 가 이긴다. 2026-08-20·08-25 두 번, 먼저
+      # 머지된 커밋의 태그가 최종으로 남아 그 뒤 변경이 빠진 판이 배포됐다. 그때도
+      # 모든 job 이 success 라 어디에도 드러나지 않았다.
+      #
+      # 낡은 워크플로가 물러나면 최신 워크플로가 자기 태그를 민다. 밀 것이 없어지는
+      # 경우는 없다.
+      - id: freshness
+        name: 내가 아직 dev HEAD 인지 확인
+        run: |
+          LATEST=$(git ls-remote "https://github.com/${{ github.repository }}.git" refs/heads/dev | cut -f1)
+          if [ "$LATEST" = "$GITHUB_SHA" ]; then
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+            # 건너뛴 사실을 남긴다. 조용히 지나가면 이번처럼 초록불만 남는다.
+            echo "::notice::dev HEAD 가 이미 ${LATEST:0:12} 다. 이 워크플로(${GITHUB_SHA:0:12})는 태그를 밀지 않는다."
+          fi
       - uses: actions/checkout@v4
+        if: steps.freshness.outputs.latest == 'true'
         with:
           repository: LikeLionTeam4/slash-infra
           ref: dev
           token: ${{ secrets.INFRA_PUSH_TOKEN }}
       - name: Bump image.tag in values-dev.yaml
+        if: steps.freshness.outputs.latest == 'true'
         run: |
           FILE="helm/slash-api/values-dev.yaml"
           TAG="sha-${GITHUB_SHA}"
@@ -162,6 +184,7 @@ jobs:
           fi
           grep -n "tag:" "$FILE"
       - name: Commit and push (retry on race with other services)
+        if: steps.freshness.outputs.latest == 'true'
         run: |
           git config user.name "slash-infra-cd-bot"
           git config user.email "actions@users.noreply.github.com"
@@ -176,6 +199,15 @@ jobs:
           git commit -m "chore(slash-api): bump dev image tag to sha-${GITHUB_SHA:0:12}"
 
           for i in 1 2 3 4 5; do
+            # 위 확인과 push 사이에도 새 커밋이 들어올 수 있다. 재시도할 때마다 다시 본다 —
+            # 재시도는 rebase 후 자기 태그를 다시 미는 것이라, 여기서 물러나지 않으면
+            # 낡은 태그가 최신을 덮는다. (#77)
+            LATEST=$(git ls-remote "https://github.com/${{ github.repository }}.git" refs/heads/dev | cut -f1)
+            if [ "$LATEST" != "$GITHUB_SHA" ]; then
+              echo "::notice::미는 사이 dev HEAD 가 ${LATEST:0:12} 로 바뀌었다. 물러난다."
+              exit 0
+            fi
+
             git push origin dev && exit 0
             git fetch origin dev
             # rebase 가 충돌하면 저장소가 rebase 중 상태로 남아 남은 재시도가 모두 헛돈다.
