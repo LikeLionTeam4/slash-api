@@ -122,6 +122,20 @@ public class LlmSummaryRunner {
         return true;
     }
 
+    /**
+     * <b>이 경로는 원문을 지우지 않는다.</b> (slash-docs#3 · 원문 기본 미저장)
+     *
+     * <p>CPU 추출 요약({@code TaskService.executeExtractiveSummary})은 성공 시점에
+     * {@code input_text}·{@code parameters.text}·{@code request_summary} 를 정리하는데,
+     * 여기는 {@code succeed} 의 세 인자 버전을 그대로 쓴다. <b>일부러 뺀 것이다</b> —
+     * {@code slash.summary.engine} 기본값이 {@code EXTRACTIVE} 이고 GPU 도 내려가
+     * (slash-infra#70) 도달할 수 없는 경로에 정리 규칙을 얹으면, 검증하지 못한 코드가
+     * 남는다.
+     *
+     * <p><b>GEMMA 를 다시 열 때는 함께 붙여야 한다.</b> 그때 정리할 자리가 하나 더 있다 —
+     * 이 경로는 원장을 남기므로 {@code async_jobs.input} 에도 원문이 통째로 들어간다.
+     * CPU 경로에는 없는 자리다.
+     */
     private void succeed(long jobId, long taskId, UUID resultEventId, LlmSummaryOutcome.Success success) {
         LlmSummaryResponse response = success.response();
         JSONB result = toResult(response);

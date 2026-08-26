@@ -179,7 +179,20 @@ public class TaskStateWriter {
      */
     @Transactional
     public boolean succeed(long taskId, JSONB result, String message) {
-        if (finishSucceeded(taskId, result, message)) {
+        return succeed(taskId, result, message, null);
+    }
+
+    /**
+     * 성공으로 마감하면서 원문을 함께 걷어낸다. (slash-docs#3 · 원문 기본 미저장)
+     *
+     * <p><b>같은 트랜잭션에 두는 것이 핵심이다.</b> 마감과 정리를 나누면 그 사이에 Pod 이
+     * 내려갔을 때 원문이 남고, 그 작업은 이미 마감돼 있어 <b>다시 정리할 기회가 없다.</b>
+     *
+     * @param disposal 원문을 대신할 값들. {@code null} 이면 지금까지처럼 원문을 그대로 둔다
+     */
+    @Transactional
+    public boolean succeed(long taskId, JSONB result, String message, RawTextDisposal disposal) {
+        if (finishSucceeded(taskId, result, message, disposal)) {
             return true;
         }
 
@@ -188,13 +201,21 @@ public class TaskStateWriter {
             log.debug("성공 마감을 반영하지 못했다. 이미 마감된 작업이다. taskId={}", taskId);
             return false;
         }
-        return finishSucceeded(taskId, result, message);
+        return finishSucceeded(taskId, result, message, disposal);
     }
 
-    private boolean finishSucceeded(long taskId, JSONB result, String message) {
+    /** 원문을 대신할 값들. {@link #succeed(long, JSONB, String, RawTextDisposal)} 참고. */
+    public record RawTextDisposal(String inputText, JSONB parameters, String requestSummary) {
+    }
+
+    private boolean finishSucceeded(long taskId, JSONB result, String message, RawTextDisposal disposal) {
         Optional<TasksRecord> finished = taskRepository.succeed(taskId, TaskStatus.RUNNING, result);
         if (finished.isEmpty()) {
             return false;
+        }
+        if (disposal != null) {
+            taskRepository.dropRawText(taskId, disposal.inputText(), disposal.parameters(),
+                    disposal.requestSummary());
         }
         taskEventRepository.append(taskId, TaskStatus.RUNNING, TaskStatus.SUCCEEDED, null, message);
         notifyFinished(finished.get(), TaskStatus.RUNNING, TaskStatus.SUCCEEDED);
