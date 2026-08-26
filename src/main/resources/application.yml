@@ -32,7 +32,7 @@ spring:
     scheduling:
       # 주기 작업은 기본값이 스레드 1개라 모두 한 줄로 선다. 붙지 못한 Valkey 에 구독을
       # 시도하는 동안(연결 대기까지 수 초) 스윕들이 그만큼 밀리므로 여유를 둔다.
-      # 지금 도는 주기 작업은 스윕 6개와 구독 재시도 1개, 모델 준비 확인 1개다.
+      # 지금 도는 주기 작업은 스윕 8개와 구독 재시도 1개, 모델 준비 확인 1개다.
       # 그중 모델 준비 확인은 slash.summary.engine=GEMMA 일 때만 만들어진다.
       pool:
         size: 3
@@ -370,3 +370,13 @@ slash:
       # 만료 판정이 분 단위라 촘촘할 이유가 없다.
       interval-ms: 60000
       batch-size: 100
+
+    # 보존 기간이 지난 멱등 기록 정리 (IdempotencyRecordSweeper)
+    idempotency-sweep:
+      # 보존 기간은 코드 상수다(TaskService.IDEMPOTENCY_RETENTION · 문서 3.4.6). 여기서
+      # 정하는 것은 "얼마나 자주 치우는가" 뿐이다.
+      #
+      # 조회가 expires_at 을 보지 않아 지우는 것이 곧 보존 기간의 집행이다. 주기만큼
+      # 기록이 더 살아 있으므로 촘촘한 편이 계약에 가깝지만, 멱등 키가 UUID v4 라
+      # 재생될 일이 없어 실제로 걸리는 것은 표 크기뿐이다. pairing 쪽과 같은 값을 쓴다.
+      interval-ms: 600000
