@@ -283,6 +283,50 @@ public class TaskRepository {
                 .execute();
     }
 
+    /**
+     * 성공했는데 원문이 남아 있는 요약을 찾아 정리한다. (slash-docs#3 · 원문 기본 미저장)
+     *
+     * <p><b>왜 배치가 또 필요한가.</b> 신규 건은 {@link #dropRawText} 가 성공 마감과 같은
+     * 트랜잭션에서 지우고, 과거 행은 {@code V015} 가 한 번 맞췄다. 그런데 <b>배포 롤링 중에
+     * 옛 Pod 이 접수한 요약</b>은 둘 다 비껴간다 — 마이그레이션은 새 Pod 이 뜰 때 한 번
+     * 돌고, 그 뒤에도 옛 Pod 은 잠시 트래픽을 받기 때문이다. 2026-08-26 배포에서 실제로
+     * 한 건이 그렇게 남았다.
+     *
+     * <p>마이그레이션을 또 만드는 것으로는 막지 못한다. <b>배포할 때마다 다시 생기는
+     * 종류</b>라 상시로 도는 쪽이 맞다.
+     *
+     * <p><b>{@code V015} 와 같은 규칙으로 만든다.</b> 문구도 자르는 방식도 같아야 같은
+     * 작업이 언제 정리됐는지에 따라 다르게 보이지 않는다. ({@code RequestSummary} 가
+     * 규칙을 한 곳에 두는 것과 같은 이유)
+     *
+     * <p><b>{@code jsonb_exists} 를 쓰는 이유</b> — 같은 뜻인 {@code parameters ? 'text'} 의
+     * {@code ?} 는 plain SQL 에서 <b>바인딩 자리로 해석된다.</b> 마이그레이션({@code V015})은
+     * Flyway 가 그대로 실행해서 문제가 없지만 여기서는 아니다. 함수로 쓰면 그 모호함이 없다.
+     *
+     * @param batchSize 한 회차에서 다룰 최대 건수. 잠금을 오래 잡지 않게 나눈다
+     * @return 정리한 건수
+     */
+    public int dropRawTextFromSucceededSummaries(int batchSize) {
+        return dsl.execute("""
+                UPDATE tasks
+                SET input_text      = '[서버에서 요약 · 원문 '
+                                          || length(parameters ->> 'text')
+                                          || '자, 요약 후 저장하지 않음]',
+                    parameters      = (parameters - 'text')
+                                          || jsonb_build_object('inputLength', length(parameters ->> 'text')),
+                    request_summary = left(btrim(regexp_replace(result ->> 'summary', '\\s+', ' ', 'g')), 80),
+                    version         = version + 1
+                WHERE id IN (
+                    SELECT id FROM tasks
+                    WHERE task_type = 'TEXT_SUMMARY'
+                      AND status = 'SUCCEEDED'
+                      AND jsonb_exists(parameters, 'text')
+                      AND jsonb_exists(result, 'summary')
+                    LIMIT ?
+                )
+                """, batchSize);
+    }
+
     // ------------------------------------------------------------------
     // 상태 전이
     // ------------------------------------------------------------------
