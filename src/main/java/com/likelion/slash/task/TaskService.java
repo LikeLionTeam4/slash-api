@@ -34,6 +34,7 @@ import com.likelion.slash.nlu.NluSummaryClient;
 import com.likelion.slash.nlu.SummaryOutcome;
 import com.likelion.slash.nlu.dto.NluAnalyzeResponse;
 import com.likelion.slash.nlu.dto.NluSummaryResponse;
+import com.likelion.slash.task.TaskStateWriter.RawTextDisposal;
 import com.likelion.slash.task.dto.BrowserSummaryResultRequest;
 import com.likelion.slash.task.dto.CreateRequestRequest;
 import com.likelion.slash.task.dto.CreateRequestResponse;
@@ -605,8 +606,36 @@ public class TaskService {
         }
 
         SummaryOutcome.Success success = (SummaryOutcome.Success) outcome;
-        stateWriter.succeed(task.getId(), toJsonb(summaryResult(success.response())), "요약했습니다.");
+        stateWriter.succeed(task.getId(), toJsonb(summaryResult(success.response())), "요약했습니다.",
+                summaryRawTextDisposal(parameters, success.response().summary()));
         return TaskStatus.SUCCEEDED;
+    }
+
+    /**
+     * 요약이 끝난 뒤 원문 자리에 남길 값들. (slash-docs#3 · 원문 기본 미저장)
+     *
+     * <p><b>원문을 들고 있어야 하는 이유가 실패 재시도뿐이라, 성공한 순간 사라진다.</b>
+     * 실패·되묻기로 끝난 작업은 그대로 두어 사용자가 다시 누를 수 있게 한다.
+     *
+     * <p><b>{@code requestSummary} 도 함께 바꾼다.</b> 지금까지는 원문 앞 80자였는데 그것도
+     * 원문 발췌라, 분량과 무관하게 남길 이유가 같다. 이 시점에는 요약 결과가 이미 있으므로
+     * 그것을 쓴다 — 목록에서 "무엇을 요약했는지" 알아보는 데도 원문 앞부분보다 낫다.
+     * ({@code BROWSER} 경로가 처음부터 쓰던 방식이다)
+     *
+     * <p>완전한 미저장은 애초에 불가능하다. 추출 요약은 원문에서 문장을 그대로 고르므로
+     * 결과 자체가 원문의 부분집합이다. 목표는 <b>전체 원문을 오래 갖고 있지 않는 것</b>이다.
+     */
+    private RawTextDisposal summaryRawTextDisposal(Map<String, Object> parameters, String summary) {
+        String rawText = String.valueOf(parameters.get(PARAMETER_TEXT));
+
+        Map<String, Object> kept = new LinkedHashMap<>(parameters);
+        kept.remove(PARAMETER_TEXT);
+        kept.put("inputLength", rawText.length());
+
+        return new RawTextDisposal(
+                "[서버에서 요약 · 원문 " + rawText.length() + "자, 요약 후 저장하지 않음]",
+                toJsonb(kept),
+                summarize(summary));
     }
 
     /**

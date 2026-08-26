@@ -260,6 +260,29 @@ public class TaskRepository {
                 .execute() == 1;
     }
 
+    /**
+     * 요약이 끝난 작업에서 원문을 걷어낸다. (slash-docs#3 · 원문 기본 미저장)
+     *
+     * <p><b>{@code input_text} 는 지우지 않고 문구로 바꾼다.</b> 그 열이 {@code NOT NULL} 이고,
+     * 화면은 이미 "원문이 없는 경우"를 그릴 줄 안다 — {@code BROWSER} 경로가 같은 방식으로
+     * 문구를 채워 왔기 때문이다.
+     *
+     * <p>상태를 조건에 넣지 않는다. 부르는 쪽이 성공 마감과 같은 트랜잭션에서 쓰므로 이미
+     * 마감된 뒤이고, 여기서 {@code SUCCEEDED} 를 다시 확인하면 그 트랜잭션 안에서는 아직
+     * 보이지 않는 값을 기다리는 꼴이 된다.
+     *
+     * @param requestSummary 목록에 남길 한 줄. 원문 발췌 대신 요약 결과로 바꿔 넣는다
+     */
+    public void dropRawText(long id, String inputText, JSONB parameters, String requestSummary) {
+        dsl.update(TASKS)
+                .set(TASKS.INPUT_TEXT, inputText)
+                .set(TASKS.PARAMETERS, parameters)
+                .set(TASKS.REQUEST_SUMMARY, requestSummary)
+                .set(TASKS.VERSION, TASKS.VERSION.plus(1))
+                .where(TASKS.ID.eq(id))
+                .execute();
+    }
+
     // ------------------------------------------------------------------
     // 상태 전이
     // ------------------------------------------------------------------
