@@ -1,5 +1,7 @@
 package com.likelion.slash.task;
 
+import java.util.regex.Pattern;
+
 /**
  * 이력 목록에 한 줄로 보여줄 요약.
  *
@@ -15,6 +17,19 @@ public final class RequestSummary {
     /** 목록 한 줄에 들어갈 만한 길이. 넘으면 자른다. */
     private static final int MAX_LENGTH = 80;
 
+    /**
+     * 줄바꿈과 연속 공백을 한 칸으로 만든다.
+     *
+     * <p><b>"한 줄"이라고 해 놓고 줄바꿈을 그대로 넣고 있었다.</b> 사용자가 여러 줄을 붙여
+     * 넣으면 목록 한 칸에 줄바꿈이 섞여 들어갔다. 요약 결과를 여기에 쓰기 시작하면서
+     * (slash-docs#3 · 원문 기본 미저장) 더 자주 드러난다 — 모델이 줄 단위로 끊어 내놓는
+     * 형식이 있어서다.
+     *
+     * <p>자르기 <b>전에</b> 줄인다. 뒤에 하면 줄바꿈이 글자 수를 차지해 실제로 보이는 양이
+     * 그만큼 줄어든다.
+     */
+    private static final Pattern BLANKS = Pattern.compile("\\s+");
+
     private RequestSummary() {
     }
 
@@ -22,7 +37,7 @@ public final class RequestSummary {
         if (text == null) {
             return null;
         }
-        String trimmed = text.trim();
-        return trimmed.length() <= MAX_LENGTH ? trimmed : trimmed.substring(0, MAX_LENGTH);
+        String flattened = BLANKS.matcher(text).replaceAll(" ").trim();
+        return flattened.length() <= MAX_LENGTH ? flattened : flattened.substring(0, MAX_LENGTH);
     }
 }
