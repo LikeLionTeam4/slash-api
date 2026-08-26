@@ -76,7 +76,12 @@ public class IdempotencyRecordRepository {
     }
 
     /**
-     * 보존 기간이 지난 기록을 지운다. 배치가 주기적으로 호출한다. ({@code idx_idempotency_expires})
+     * 보존 기간이 지난 기록을 지운다. {@link IdempotencyRecordSweeper} 가 주기적으로
+     * 호출한다. ({@code idx_idempotency_expires})
+     *
+     * <p><b>조회가 {@code expires_at} 을 보지 않으므로 이 삭제가 보존 기간의 유일한
+     * 집행 수단이다.</b> {@link #find} 도 {@code TaskService.replay} 도 키와 경로만
+     * 보기 때문에, 지워지지 않은 기록은 만료 시각이 지나도 계속 재생 대상이 된다.
      *
      * @return 지운 건수
      */
