@@ -41,6 +41,9 @@ class SummaryRawTextSweeperTest {
     private SummaryRawTextSweeper sweeper;
 
     @Autowired
+    private TaskService taskService;
+
+    @Autowired
     private DSLContext dsl;
 
     @Autowired
@@ -90,6 +93,9 @@ class SummaryRawTextSweeperTest {
         JsonNode parameters = objectMapper.readTree(작업.getParameters().data());
         assertThat(parameters.has("text")).isFalse();
         assertThat(parameters.path("inputLength").asInt()).isEqualTo(원문.length());
+
+        // 뒤늦게 거둔 건도 화면에는 "원문이 아니다"로 보여야 한다. (#84)
+        assertThat(taskService.inputTextIsOriginal(작업)).isFalse();
     }
 
     @Test

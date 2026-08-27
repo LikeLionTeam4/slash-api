@@ -157,6 +157,7 @@ public class RequestController {
                 task.getExecutionTarget(),
                 devicePublicId(task.getDeviceId()),
                 task.getInputText(),
+                taskService.inputTextIsOriginal(task),
                 readJson(task.getParameters()),
                 readJson(task.getResult()),
                 task.getErrorCode(),
