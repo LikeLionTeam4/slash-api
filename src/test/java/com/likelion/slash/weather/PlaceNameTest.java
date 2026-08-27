@@ -76,6 +76,18 @@ class PlaceNameTest {
     }
 
     @Test
+    @DisplayName("제주도는 혼자 오면 지명, 뒤에 지명이 따라오면 도 이름이다")
+    void 제주도는_두_쓰임을_가진다() {
+        // 혼자 오면 지명이다.
+        assertThat(PlaceName.candidatesOf("제주도")).containsExactly("제주시");
+
+        // 뒤에 지명이 따라오면 도 이름이다. 떼지 않으면 "제주도 한림" 을 그대로 물어보게
+        // 되는데 지오코딩에 그런 이름은 없다. (실측)
+        assertThat(PlaceName.candidatesOf("제주도 한림")).containsExactly("한림시", "한림");
+        assertThat(PlaceName.candidatesOf("제주도 서귀포")).containsExactly("서귀포시", "서귀포");
+    }
+
+    @Test
     @DisplayName("도 이름이 아닌 두 낱말은 그대로 둔다")
     void 도가_아닌_두_낱말은_건드리지_않는다() {
         // "서울 강남구" 처럼 광역시 + 자치구는 붙여서 물어봐야 한다.
