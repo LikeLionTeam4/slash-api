@@ -7,8 +7,28 @@ Slash(/)는 자연어 질문과 `/` 슬래시 명령어를 한 입력창에서 �
 
 - 인증
 - 작업 관리
-- 실행 위치 결정 (로컬 / 서버)
+- **실행 위치 결정** — 브라우저(`BROWSER`) · 사용자 PC(`RUNNER`) · 서버(`BACKEND`)
 - DB 연동
+
+## 지금 되는 것
+
+일곱 가지다. 슬래시 명령으로도, 평범한 말로도 접수된다 — 브라우저는 가르지 않고 입력창의
+한 줄을 그대로 보내고, 무엇을 시켰는지는 slash-nlu 가 판단한다.
+
+| 명령 | 하는 일 | 실행 위치 |
+|---|---|---|
+| `/status` | PC 상태 조회 | 사용자 PC |
+| `/file` | PC 파일 검색 | 사용자 PC |
+| `/open` | 찾은 파일의 위치를 파일 탐색기로 표시 | 사용자 PC |
+| `/code` | 로컬 AI 도구로 코드 분석 (읽기 전용) | 사용자 PC |
+| `/usage` | 로컬 AI 도구 사용량 조회 | 사용자 PC |
+| `/weather` | 날씨 조회 (Open-Meteo) | 서버 |
+| `/summary` | 텍스트 요약 | 브라우저 · 서버 · PC |
+
+**`/summary` 만 실행 위치가 셋으로 갈린다.** WebGPU 를 지원하는 브라우저는 원문을 밖으로
+내보내지 않고 그 자리에서 요약한 뒤 **결과만** 제출한다. 그렇지 않으면 서버가 CPU 추출
+요약으로 처리하고, **요약이 끝나면 원문을 갖고 있지 않는다.** 자세한 것은
+[프론트엔드 연동 규약](docs/frontend-api-contract.md)에 있다.
 
 ## 시작하기
 
@@ -95,8 +115,12 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 
 ### 환경 변수
 
-`local` 은 값이 모두 기본 설정되어 있어 별도 주입이 필요 없다.
-`dev`·`demo` 는 아래 값을 Secrets Manager 에서 주입한다.
+`local` 은 값이 모두 기본 설정되어 있어 별도 주입이 필요 없다. `dev`·`demo` 는 Helm
+차트(`slash-infra/helm/slash-api/values-<env>.yaml`)가 주입한다.
+
+**Secrets Manager 를 거치는 것은 DB 자격증명 둘뿐이다**(`DB_USERNAME`·`DB_PASSWORD` —
+External Secrets 가 동기화한다). 나머지는 평문 env 다. RDS·Valkey 엔드포인트와 Cognito
+값은 공개 클라이언트가 쓰는 값이라 비밀이 아니다.
 
 | 변수 | 설명 |
 |---|---|
@@ -107,7 +131,17 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 | `COGNITO_CLIENT_ID` | App Client ID. 다른 Client 의 토큰을 거르는 기준 |
 | `COGNITO_USER_INFO_URI` | Hosted UI 의 `/oauth2/userInfo`. 최초 로그인 시 이메일을 받아온다 |
 | `CORS_ALLOWED_ORIGINS` | 웹 클라이언트 오리진 (쉼표 구분) |
-| `NLU_BASE_URL` | slash-nlu 내부 주소 (예: `http://slash-nlu/internal/v1`) |
+| `NLU_BASE_URL` | slash-nlu 내부 주소 (예: `http://slash-nlu`). 뒤 경로는 코드가 붙인다 |
+
+동작을 바꾸는 값들이다. 모두 기본값이 있어 넣지 않아도 돌지만, 넣으면 **배포 없이** 정책이
+바뀐다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `SUMMARY_ENGINE` | `EXTRACTIVE` | 요약 엔진. `EXTRACTIVE` 는 slash-nlu 의 CPU 추출 요약이다. GPU 경로로 되돌리려면 `LLM_BASE_URL` 도 함께 채워야 한다 |
+| `TEXT_SUMMARY_RUNNER_ENABLED` | `false` | 선택한 PC 가 요약 능력을 보고했을 때 그 PC 로 보낼지. `false` 여도 요약 자체는 막히지 않고 서버가 대신 한다 |
+| `APPROVAL_REQUIRED_TASK_TYPES` | (비어 있음) | 실행 전에 사용자 확인을 받을 작업 유형. 지금은 해당하는 유형이 없다 |
+| `TRUSTED_PROXY_HOPS` | `0` | 믿을 수 있는 프록시 단 수. **실제보다 작으면 위조된 주소를 믿게 되므로** 인프라 담당자와 확인하고 넣는다 |
 
 > 자격증명을 저장소에 평문으로 두지 않는다. Namespace 를 코드에 고정하지 않는다.
 
@@ -127,6 +161,8 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 |---|---|---|
 | [프론트엔드 연동 규약](docs/frontend-api-contract.md) | slash-web | 공통 헤더, 응답·오류 형식, 오류 코드, Cognito 인증 흐름, WSS Ticket |
 | [W1-06 WSS 멀티 Pod 라우팅](docs/w1-06-wss-routing.md) | 팀 · slash-infra | Pod 간 이벤트 전달 — 선택지 비교와 채택안(Valkey Pub/Sub) |
+| [부하 시험](docs/load-test/README.md) | 팀 | 어디가 먼저 막히는가 — 경로별 포화 처리량과 병목의 위치 |
+| [기능 동결 시점 상태](docs/feature-freeze-2026-08-26.md) | 팀 | 2026-08-26 기준 일곱 명령 종단 확인 결과와 남긴 것 |
 
 ## 관련 저장소
 
@@ -135,7 +171,7 @@ SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun
 | [slash-web](https://github.com/LikeLionTeam4/slash-web) | 웹 클라이언트 — React·Vite UI, S3/CloudFront 배포 |
 | **slash-api** (현재) | 코어 API — 인증, 작업 관리, 실행 위치 결정, DB 연동 |
 | [slash-nlu](https://github.com/LikeLionTeam4/slash-nlu) | 자연어 분석 — slash 명령 파싱, 규칙·Kiwi 의도 분류, 인자 추출 |
-| [slash-llm](https://github.com/LikeLionTeam4/slash-llm) | LLM 서비스 — Gemma 추론, 요약·대화 생성 |
+| [slash-llm](https://github.com/LikeLionTeam4/slash-llm) | LLM 서비스 — Gemma 추론. **2026-08-25 배포를 정리해 지금은 쓰지 않는다**(요약이 CPU 추출·브라우저 WebLLM 으로 갈리면서 GPU 경로를 유지할 이유가 없어졌다). 코드는 남아 있어 되돌릴 수 있다 |
 | [slash-runner](https://github.com/LikeLionTeam4/slash-runner) | PC 작업 실행기 — PC 파일 검색, 상태 조회, 로컬 AI 실행·결과 전달 |
 | [slash-infra](https://github.com/LikeLionTeam4/slash-infra) | 인프라 — Terraform(AWS), Helm·ArgoCD 배포 |
 | [slash-docs](https://github.com/LikeLionTeam4/slash-docs) | 프로젝트 문서 — 아키텍처, API 계약, ERD, 회의록 |
