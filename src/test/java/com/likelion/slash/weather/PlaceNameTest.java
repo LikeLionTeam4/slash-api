@@ -95,6 +95,39 @@ class PlaceNameTest {
     }
 
     @Test
+    @DisplayName("도 이름만 말하면 조회하지 않고 되묻는다")
+    void 도_이름만_말하면_되묻는다() {
+        // 도 전체의 날씨를 한 좌표로 답할 수 없다. 게다가 "경기도" 는 김포시 좌표가
+        // 걸린다 — 사용자는 그것이 김포시인 줄 모른다. (실측 · #89)
+        assertThat(PlaceName.candidatesOf("경기도")).isEmpty();
+        assertThat(PlaceName.candidatesOf("경기")).isEmpty();
+        assertThat(PlaceName.candidatesOf("강원도")).isEmpty();
+        assertThat(PlaceName.candidatesOf("전라도")).isEmpty();
+
+        // "제주" 는 도이면서 시라 예외다. "제주 날씨" 는 제주시로 답하는 것이 맞다.
+        assertThat(PlaceName.candidatesOf("제주")).containsExactly("제주시");
+        assertThat(PlaceName.candidatesOf("제주도")).containsExactly("제주시");
+    }
+
+    @Test
+    @DisplayName("사용자가 말한 도를 대조용 열쇠로 줄인다")
+    void 도_대조_열쇠를_만든다() {
+        // 축약형과 정식명이 같은 열쇠가 되어야 맞출 수 있다.
+        assertThat(PlaceName.provinceKey("경기도")).isEqualTo("경기");
+        assertThat(PlaceName.provinceKey("충청남도")).isEqualTo("충청");
+        assertThat(PlaceName.provinceKey("충남")).isEqualTo("충청");
+        assertThat(PlaceName.provinceKey("전남")).isEqualTo("전라");
+        assertThat(PlaceName.provinceKey("전라도")).isEqualTo("전라");
+        assertThat(PlaceName.provinceKey("제주특별자치도")).isEqualTo("제주");
+
+        // 도를 말한 경우에만 뽑힌다.
+        assertThat(PlaceName.provinceKeyOf("제주도 성산")).contains("제주");
+        assertThat(PlaceName.provinceKeyOf("경기도 광주")).contains("경기");
+        assertThat(PlaceName.provinceKeyOf("서울 강남구")).isEmpty();
+        assertThat(PlaceName.provinceKeyOf("광주")).isEmpty();
+    }
+
+    @Test
     @DisplayName("앞뒤 공백은 떼고 물어본다")
     void 공백을_떼어낸다() {
         assertThat(PlaceName.candidatesOf("  서울 ")).containsExactly("서울특별시");
