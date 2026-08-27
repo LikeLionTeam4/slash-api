@@ -10,7 +10,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.ExecutionTarget;
-import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.common.error.ErrorCode;
@@ -48,7 +47,6 @@ class TaskRepositoryTest {
 
         assertThat(task.getStatus()).isEqualTo(TaskStatus.CREATED.name());
         assertThat(task.getTaskType()).isNull();
-        assertThat(task.getProcessingRoute()).isNull();
         assertThat(task.getCompletedAt()).isNull();
     }
 
@@ -182,8 +180,7 @@ class TaskRepositoryTest {
         assertThat(분석된_작업.getTaskType()).isEqualTo(TaskType.WEATHER_LOOKUP.name());
         assertThat(분석된_작업.getRequestSummary()).isEqualTo("서울 날씨 조회");
 
-        // 처리 경로는 유형에서 파생된 상수이고, 실행 위치는 서버가 정해 넘긴 값이다. 둘 다 남는다.
-        assertThat(분석된_작업.getProcessingRoute()).isEqualTo(ProcessingRoute.BACKEND_SERVICE.name());
+        // 실행 위치는 서버가 정해 넘긴 값이다.
         assertThat(분석된_작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
     }
 

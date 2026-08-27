@@ -86,7 +86,6 @@ public final class TestFixtures {
                 .set(TASKS.INPUT_TEXT, inputText)
                 .set(TASKS.REQUEST_SUMMARY, inputText)
                 .set(TASKS.TASK_TYPE, taskType.name())
-                .set(TASKS.PROCESSING_ROUTE, taskType.processingRoute().name())
                 .set(TASKS.STATUS, status)
                 // ck_tasks_completed_at — 끝난 작업에는 완료 시각이 반드시 있어야 한다
                 .set(TASKS.COMPLETED_AT, 끝난_상태(status) ? SlashTime.now() : null)

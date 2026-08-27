@@ -18,14 +18,14 @@ public enum TaskType {
 
     WEATHER_LOOKUP(
             "/weather",
-            ProcessingRoute.BACKEND_SERVICE,
+            ExecutionTarget.BACKEND,
             Priority.P0,
             List.of("location"),
             List.of()),
 
     FILE_SEARCH(
             "/file",
-            ProcessingRoute.LOCAL_AGENT,
+            ExecutionTarget.RUNNER,
             Priority.P0,
             List.of("query", "searchFolderId"),
             // searchFolderId 는 Agent 가 READY 로 보고한 searchFolders 중에서 서버가 고른다.
@@ -44,14 +44,14 @@ public enum TaskType {
      */
     FILE_OPEN(
             "/open",
-            ProcessingRoute.LOCAL_AGENT,
+            ExecutionTarget.RUNNER,
             Priority.P0,
             List.of("fileRef"),
             List.of()),
 
     SYSTEM_STATUS(
             "/status",
-            ProcessingRoute.LOCAL_AGENT,
+            ExecutionTarget.RUNNER,
             Priority.P0,
             // metrics 는 생략 시 전체(CPU·MEMORY·DISK)를 조회한다.
             List.of(),
@@ -59,7 +59,7 @@ public enum TaskType {
 
     TEXT_SUMMARY(
             "/summary",
-            ProcessingRoute.LLM_SERVICE,
+            ExecutionTarget.BACKEND,
             Priority.P0,
             List.of("text"),
             List.of()),
@@ -75,7 +75,7 @@ public enum TaskType {
      */
     CODE_ANALYSIS(
             "/code",
-            ProcessingRoute.LOCAL_AGENT,
+            ExecutionTarget.RUNNER,
             Priority.P0,
             // 무엇을 물어볼지(query)가 없으면 CLI 가 빈 질문으로 돌다가 시간만 쓴다.
             // 실행기도 query 를 검증하지 않으므로 여기서 필수로 둬야 NLU 가 되묻는다.
@@ -94,7 +94,7 @@ public enum TaskType {
      */
     AI_AGENT_USAGE(
             "/usage",
-            ProcessingRoute.LOCAL_AGENT,
+            ExecutionTarget.RUNNER,
             Priority.P0,
             List.of("provider"),
             List.of());
@@ -112,18 +112,18 @@ public enum TaskType {
             FILE_SEARCH, FILE_OPEN, SYSTEM_STATUS, CODE_ANALYSIS, AI_AGENT_USAGE, TEXT_SUMMARY);
 
     private final String slashCommand;
-    private final ProcessingRoute processingRoute;
+    private final ExecutionTarget defaultExecutionTarget;
     private final Priority priority;
     private final List<String> requiredParameters;
     private final List<String> backendProvidedParameters;
 
     TaskType(String slashCommand,
-             ProcessingRoute processingRoute,
+             ExecutionTarget defaultExecutionTarget,
              Priority priority,
              List<String> requiredParameters,
              List<String> backendProvidedParameters) {
         this.slashCommand = slashCommand;
-        this.processingRoute = processingRoute;
+        this.defaultExecutionTarget = defaultExecutionTarget;
         this.priority = priority;
         this.requiredParameters = requiredParameters;
         this.backendProvidedParameters = backendProvidedParameters;
@@ -133,8 +133,15 @@ public enum TaskType {
         return slashCommand;
     }
 
-    public ProcessingRoute processingRoute() {
-        return processingRoute;
+    /**
+     * 다른 근거가 없을 때의 실행 위치.
+     *
+     * <p><b>이 값이 끝이 아니다.</b> 사용자가 PC 를 고르고 그 PC 가 능력을 보고했으면
+     * {@code RUNNER} 로 가고, 브라우저가 스스로 요약해 결과만 제출하면 {@code BROWSER} 다.
+     * 그 판단은 {@code TaskService.resolveExecutionTarget()} 이 한다.
+     */
+    public ExecutionTarget defaultExecutionTarget() {
+        return defaultExecutionTarget;
     }
 
     public Priority priority() {
@@ -168,9 +175,9 @@ public enum TaskType {
                 .toList();
     }
 
-    /** 실행 대상 PC 선택이 필요한 작업인지 확인한다. */
+    /** 실행 대상 PC 선택이 필요한 작업인지 확인한다. PC 말고는 실행할 곳이 없는 작업이다. */
     public boolean requiresDevice() {
-        return processingRoute == ProcessingRoute.LOCAL_AGENT;
+        return defaultExecutionTarget == ExecutionTarget.RUNNER;
     }
 
     /**

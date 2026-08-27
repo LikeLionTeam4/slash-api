@@ -249,7 +249,6 @@ public class TaskRepository {
 
         return dsl.update(TASKS)
                 .set(TASKS.TASK_TYPE, taskType.name())
-                .set(TASKS.PROCESSING_ROUTE, taskType.processingRoute().name())
                 .set(TASKS.EXECUTION_TARGET, executionTarget.name())
                 .set(TASKS.DEVICE_ID, deviceId)
                 .set(TASKS.PARAMETERS, parameters)

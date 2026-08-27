@@ -437,8 +437,11 @@ GET /api/v1/tasks?taskType=FILE_SEARCH&status=SUCCEEDED&deviceId=e0d6…&limit=2
 > 나가서** 읽는 쪽이 "GPU 서버가 했다" 로 오해할 수 있었습니다. 읽고 계셨다면
 > `executionTarget` 으로 옮겨 주세요. (slash-api#58 · slash-docs#3)
 >
-> 작업 유형 목록(`GET /api/v1/task-types`)의 `processingRoute` 는 그대로 둡니다. 그건 개별
-> 작업의 이력이 아니라 **유형의 속성**이고, NLU·실행기가 계약으로 참조합니다.
+> **작업 유형 목록(`GET /api/v1/task-types`)에서도 빠졌습니다.** 그 자리에
+> `defaultExecutionTarget` 이 들어갑니다 — 값이 셋(`BROWSER`·`RUNNER`·`BACKEND`)으로 통일돼
+> 이력의 `executionTarget` 과 같은 말을 쓰게 됩니다. **"다른 근거가 없을 때" 의 실행 위치라,
+> 사용자가 PC 를 고르거나 브라우저가 스스로 처리하면 실제 실행 위치는 달라집니다.**
+> (읽는 쪽을 확인했더니 web·nlu·runner 모두 이 엔드포인트를 부르지 않고 있었습니다)
 
 > **오래된 작업에는 `executionTarget` 이 없습니다.** 이 값이 생기기 전에 접수된 작업은 실제로
 > 어디서 실행됐는지 서버가 기록해 두지 않았습니다. 지어내지 않고 비워 둔 것이라, 값이 없으면

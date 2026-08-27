@@ -48,7 +48,7 @@ class TaskTypeControllerTest {
         mockMvc.perform(get("/api/v1/task-types").header("Authorization", "Bearer contract-check"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath(fileSearch + ".slashCommand").value("/file"))
-                .andExpect(jsonPath(fileSearch + ".processingRoute").value("LOCAL_AGENT"))
+                .andExpect(jsonPath(fileSearch + ".defaultExecutionTarget").value("RUNNER"))
                 .andExpect(jsonPath(fileSearch + ".priority").value("P0"))
                 .andExpect(jsonPath(fileSearch + ".requiresDevice").value(true))
                 .andExpect(jsonPath(fileSearch + ".requiredParameters[*]")

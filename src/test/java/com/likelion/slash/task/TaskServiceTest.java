@@ -25,7 +25,6 @@ import com.likelion.slash.common.enums.AsyncJobStatus;
 import com.likelion.slash.common.enums.AsyncJobType;
 import com.likelion.slash.common.enums.DeviceStatus;
 import com.likelion.slash.common.enums.ExecutionTarget;
-import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.common.error.SlashException;
@@ -143,7 +142,6 @@ class TaskServiceTest {
 
         TasksRecord 작업 = 작업조회(응답.taskId());
         assertThat(작업.getTaskType()).isEqualTo("SYSTEM_STATUS");
-        assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT.name());
         assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.RUNNER.name());
         assertThat(작업.getDeviceId()).isEqualTo(deviceId);
     }
@@ -332,7 +330,7 @@ class TaskServiceTest {
         CreateRequestResponse 응답 = taskService.accept(사용자, new CreateRequestRequest("/usage claude", null), null);
 
         assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
-        assertThat(작업조회(응답.taskId()).getProcessingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT.name());
+        assertThat(작업조회(응답.taskId()).getExecutionTarget()).isEqualTo(ExecutionTarget.RUNNER.name());
         assertThat(파라미터(응답.taskId(), "provider")).isEqualTo("CLAUDE_CODE");
     }
 
@@ -459,7 +457,7 @@ class TaskServiceTest {
                 사용자, new CreateRequestRequest("/open f62dfe8a-8525-4ba9-a0b5-7f6d70ebfedd", null), null);
 
         assertThat(응답.status()).isEqualTo(TaskStatus.QUEUED);
-        assertThat(작업조회(응답.taskId()).getProcessingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT.name());
+        assertThat(작업조회(응답.taskId()).getExecutionTarget()).isEqualTo(ExecutionTarget.RUNNER.name());
         assertThat(파라미터(응답.taskId(), "fileRef")).isEqualTo("f62dfe8a-8525-4ba9-a0b5-7f6d70ebfedd");
     }
 
@@ -691,7 +689,6 @@ class TaskServiceTest {
         assertThat(응답.status()).isEqualTo(TaskStatus.SUCCEEDED);
 
         TasksRecord 작업 = 작업조회(응답.taskId());
-        assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.BACKEND_SERVICE.name());
         assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
         assertThat(작업.getDeviceId()).isNull();
 
@@ -813,9 +810,7 @@ class TaskServiceTest {
         TasksRecord 작업 = 작업조회(응답.taskId());
         assertThat(작업.getTaskType()).isEqualTo("TEXT_SUMMARY");
 
-        // 처리 경로는 유형에서 파생된 상수라 그대로 LLM_SERVICE 다. 실제로 실행하는 곳은
-        // 서버이므로 실행 위치는 BACKEND 로 남는다 — 이 둘이 갈라지는 유일한 유형이다.
-        assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.LLM_SERVICE.name());
+        // 요약은 서버가 한다. PC 를 고르고 그 PC 가 능력을 보고했을 때만 RUNNER 로 간다.
         assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
 
         // 요약은 서버 쪽 모델이 하는 일이라 PC 를 붙들지 않는다.
