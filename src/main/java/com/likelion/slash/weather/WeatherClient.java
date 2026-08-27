@@ -94,6 +94,8 @@ public class WeatherClient {
      * 걸리는 지명이 있다.
      */
     private Optional<GeocodingResponse.Place> geocode(String location) {
+        Optional<String> expectedProvince = PlaceName.provinceKeyOf(location);
+
         for (String candidate : PlaceName.candidatesOf(location)) {
             try {
                 GeocodingResponse response = geocodingClient.get()
@@ -110,7 +112,12 @@ public class WeatherClient {
                         response == null ? List.of() : response.resultsOrEmpty();
 
                 if (!places.isEmpty()) {
-                    return Optional.of(places.get(0));
+                    GeocodingResponse.Place place = places.get(0);
+                    if (isInExpectedProvince(place, expectedProvince)) {
+                        return Optional.of(place);
+                    }
+                    log.info("찾은 곳의 도가 말한 것과 다르다 location={} candidate={} admin1={}",
+                            location, candidate, place.admin1());
                 }
 
             } catch (Exception e) {
@@ -119,6 +126,32 @@ public class WeatherClient {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * 사용자가 도를 말했으면, 찾아낸 곳이 그 도에 있는지 본다.
+     *
+     * <p><b>없는 것보다 엉뚱한 것이 나쁘다.</b> "제주도 성산" 을 물으면 제공자는 강원도
+     * 홍천군의 성산을 준다 — 못 찾았다고 답하면 사용자가 다시 말하면 그만이지만, 그 좌표는
+     * 그대로 답이 되어 사용자가 다른 동네 날씨를 자기 동네 날씨로 읽는다. (#91)
+     *
+     * <p>도를 말하지 않았으면 대조할 것이 없으므로 통과시킨다. 결과의 지명과 지역은 응답에
+     * 함께 실리므로, 엉뚱한 곳이면 사용자가 화면에서 알아챌 수 있다.
+     *
+     * <p><b>찾아낸 곳이 광역시면 대조하지 않는다.</b> 광주광역시는 전라남도에서 갈라져 나온
+     * 광역시라 사람들이 "전라도 광주" 라고 부르는데, {@code admin1} 은 "광주광역시" 다 —
+     * 도끼리 맞춰 보면 어긋난 것처럼 보여 맞는 답을 버리게 된다. 광역시는 이름 자체가
+     * 유일해서 애초에 동명이지 위험이 없다.
+     */
+    private static boolean isInExpectedProvince(GeocodingResponse.Place place,
+                                                Optional<String> expectedProvince) {
+        if (expectedProvince.isEmpty() || place.admin1() == null) {
+            return true;
+        }
+        if (!place.admin1().endsWith("도")) {
+            return true;
+        }
+        return expectedProvince.get().equals(PlaceName.provinceKey(place.admin1()));
     }
 
     private WeatherOutcome 이용할_수_없음() {

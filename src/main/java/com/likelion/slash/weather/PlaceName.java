@@ -2,6 +2,7 @@ package com.likelion.slash.weather;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -25,9 +26,14 @@ import java.util.Set;
 final class PlaceName {
 
     /**
-     * 광역 단위. 17개로 고정이라 표로 둔다.
+     * 특별시·광역시. 접미사 규칙으로는 풀 수 없어 표로 둔다 — "서울" 에 "시" 를 붙여도
+     * "서울시" 는 정식명이 아니다.
      *
-     * <p>아래 접미사 규칙으로는 풀 수 없다 — "서울" 에 "시" 를 붙여도 "서울시" 는 정식명이 아니다.
+     * <p><b>도 여덟 개는 여기 없다.</b> 정식명으로 물어도 지오코딩이 제대로 답하지 않기
+     * 때문이다 — 일곱은 "없음" 이고 <b>경기도만 김포시 좌표를 준다</b>(실측). 도 이름만
+     * 말한 경우는 {@link #PROVINCES} 쪽에서 되묻는 것으로 다룬다. (#89)
+     *
+     * <p>"제주" 는 도이면서 시라 여기 남는다 — "제주 날씨" 는 제주시로 답하는 것이 맞다.
      */
     private static final Map<String, String> WIDE_AREAS = Map.ofEntries(
             Map.entry("서울", "서울특별시"),
@@ -40,15 +46,7 @@ final class PlaceName {
             Map.entry("세종", "세종특별자치시"),
             Map.entry("제주", "제주시"),
             // "제주도" 도 사람들이 그대로 쓴다. 지오코딩은 이 이름을 찾지 못한다(실측).
-            Map.entry("제주도", "제주시"),
-            Map.entry("경기", "경기도"),
-            Map.entry("강원", "강원특별자치도"),
-            Map.entry("충북", "충청북도"),
-            Map.entry("충남", "충청남도"),
-            Map.entry("전북", "전북특별자치도"),
-            Map.entry("전남", "전라남도"),
-            Map.entry("경북", "경상북도"),
-            Map.entry("경남", "경상남도"));
+            Map.entry("제주도", "제주시"));
 
     /**
      * 앞에 붙는 도 이름.
@@ -70,7 +68,55 @@ final class PlaceName {
             "경북", "경상북도", "경남", "경상남도", "경상도",
             "제주", "제주도", "제주특별자치도");
 
+    /**
+     * 축약 도 이름을 정식명과 같은 열쇠로 맞춘다. 나머지는 앞 두 글자를 그대로 쓴다.
+     *
+     * <p>{@code 충북}·{@code 전남} 처럼 두 글자를 줄여 쓴 것은 앞 두 글자만 잘라서는
+     * 정식명과 맞출 수 없다 — {@code 충북} 은 {@code 충청} 이 아니라 {@code 충북} 이 된다.
+     */
+    private static final Map<String, String> PROVINCE_KEY_ALIASES = Map.of(
+            "충북", "충청", "충남", "충청",
+            "전북", "전라", "전남", "전라",
+            "경북", "경상", "경남", "경상");
+
     private PlaceName() {
+    }
+
+    /**
+     * 사용자가 말한 지명에서 도 이름을 뽑아 대조용 열쇠로 돌려준다. 도 이름이 없으면 비어 있다.
+     *
+     * <p><b>지오코딩이 엉뚱한 곳을 주는 것을 막기 위한 값이다.</b> "제주도 성산" 을 물으면
+     * 제공자는 <b>강원도 홍천군의 성산</b>을 준다(실측). 사용자가 도를 말했으면 결과의
+     * {@code admin1} 과 맞는지 볼 수 있다. (#91)
+     */
+    static Optional<String> provinceKeyOf(String location) {
+        String[] words = location.trim().split("\\s+");
+        if (words.length != 2 || !PROVINCES.contains(words[0])) {
+            return Optional.empty();
+        }
+        return Optional.of(provinceKey(words[0]));
+    }
+
+    /**
+     * 도 이름을 대조용 열쇠로 줄인다.
+     *
+     * <pre>
+     * 경기도 · 경기          → 경기
+     * 충청남도 · 충남        → 충청
+     * 제주특별자치도 · 제주도  → 제주
+     * 전라도 · 전라남도 · 전남 → 전라
+     * </pre>
+     *
+     * <p>{@code 전라도} 처럼 남북을 가르지 않는 말도 {@code 전라} 가 되어 전라남도·전라북도
+     * 어느 쪽과도 맞는다. 사용자가 그만큼만 말했으므로 그 이상 좁히지 않는 것이 맞다.
+     */
+    static String provinceKey(String provinceName) {
+        String trimmed = provinceName.trim();
+        String alias = PROVINCE_KEY_ALIASES.get(trimmed);
+        if (alias != null) {
+            return alias;
+        }
+        return trimmed.length() <= 2 ? trimmed : trimmed.substring(0, 2);
     }
 
     /**
@@ -111,6 +157,14 @@ final class PlaceName {
         // 뗀 뒤에 WIDE_AREAS 를 다시 보지 않는 것이 요점이다 — "경기도 광주" 의 "광주" 를
         // 그 표로 보내면 광주광역시가 되어, 도 이름을 붙여 말한 사용자의 뜻과 정반대가
         // 된다. 도 이름이 앞에 있다는 것 자체가 "그 광역시가 아니다" 라는 신호다.
+        // 도 이름만 말했으면 조회하지 않는다. 도 전체의 날씨를 한 좌표로 답할 수 없고,
+        // 실제로 "경기도" 는 김포시 좌표가 걸린다 — 사용자는 그것이 김포시인 줄 모른다.
+        // 빈 후보를 돌려주면 WeatherClient 가 LOCATION_NOT_FOUND 로 마감하고, 화면에는
+        // "시·군 이름으로 다시 말씀해 주세요" 가 나간다. (#89)
+        if (PROVINCES.contains(trimmed)) {
+            return List.of();
+        }
+
         String[] words = trimmed.split("\\s+");
         if (words.length == 2 && PROVINCES.contains(words[0])) {
             return suffixed(words[1]);

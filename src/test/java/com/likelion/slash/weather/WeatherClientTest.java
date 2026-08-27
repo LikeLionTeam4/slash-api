@@ -126,6 +126,58 @@ class WeatherClientTest {
      *
      * @param 지오코딩 물어본 이름을 받아 돌려줄 본문을 정한다. 후보에 따라 다르게 답하는 데 쓴다.
      */
+    @Test
+    @DisplayName("말한 도와 다른 곳이 걸리면 답으로 쓰지 않는다")
+    void 다른_도의_동명이지를_거른다() throws Exception {
+        // "제주도 성산" 을 물으면 제공자가 강원도 홍천군의 성산을 준다. (실측 · #91)
+        서버를_띄운다(name -> 지오코딩_결과("성산", "강원도", 37.77, 127.97), 예보_결과());
+
+        WeatherOutcome outcome = client().lookup("제주도 성산");
+
+        // 없다고 답하면 사용자가 다시 말하면 그만이지만, 저 좌표는 그대로 답이 된다.
+        assertThat(outcome).isInstanceOf(WeatherOutcome.Failure.class);
+        assertThat(((WeatherOutcome.Failure) outcome).errorCode())
+                .isEqualTo(ErrorCode.LOCATION_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("말한 도와 같은 곳이면 그대로 쓴다")
+    void 같은_도면_통과시킨다() throws Exception {
+        서버를_띄운다(name -> 지오코딩_결과("광주시", "경기도", 37.41, 127.26), 예보_결과());
+
+        WeatherOutcome outcome = client().lookup("경기도 광주");
+
+        assertThat(outcome).isInstanceOf(WeatherOutcome.Success.class);
+        assertThat(((WeatherOutcome.Success) outcome).place().name()).isEqualTo("광주시");
+    }
+
+    @Test
+    @DisplayName("찾아낸 곳이 광역시면 도끼리 맞춰 보지 않는다")
+    void 광역시는_도로_대조하지_않는다() throws Exception {
+        // 광주광역시는 전라남도에서 갈라져 나온 광역시라 "전라도 광주" 라고 부르는데
+        // admin1 은 "광주광역시" 다. 도끼리 맞춰 보면 맞는 답을 버리게 된다. (#91)
+        서버를_띄운다(name -> 지오코딩_결과("광주광역시", "광주광역시", 35.15, 126.92), 예보_결과());
+
+        WeatherOutcome outcome = client().lookup("전라도 광주");
+
+        assertThat(outcome).isInstanceOf(WeatherOutcome.Success.class);
+        assertThat(((WeatherOutcome.Success) outcome).place().name()).isEqualTo("광주광역시");
+    }
+
+    @Test
+    @DisplayName("도 이름만 말하면 조회하지 않는다")
+    void 도_이름만_말하면_묻지_않는다() throws Exception {
+        서버를_띄운다(name -> 지오코딩_결과("경기도", "경기도", 37.59, 126.77), 예보_결과());
+
+        WeatherOutcome outcome = client().lookup("경기도");
+
+        // 물어보면 김포시 좌표가 걸린다. 아예 묻지 않는다. (#89)
+        assertThat(물어본_이름).isEmpty();
+        assertThat(outcome).isInstanceOf(WeatherOutcome.Failure.class);
+        assertThat(((WeatherOutcome.Failure) outcome).errorCode())
+                .isEqualTo(ErrorCode.LOCATION_NOT_FOUND);
+    }
+
     private void 서버를_띄운다(Function<String, String> 지오코딩, String 예보) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 
