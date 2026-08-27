@@ -84,6 +84,15 @@ public class TaskService {
     /** TEXT_SUMMARY 의 원문. NLU 가 채운다. */
     private static final String PARAMETER_TEXT = "text";
 
+    /**
+     * 원문을 걷어낸 자리에 남기는 글자 수. <b>원문을 버릴 때만</b> 넣는다.
+     *
+     * <p>그래서 이 값이 있으면 {@code input_text} 는 원문이 아니다 —
+     * {@link #inputTextIsOriginal} 이 그것으로 판단한다. 정리 SQL
+     * ({@link TaskRepository#dropRawTextFromSucceededSummaries}) 도 같은 키를 쓴다.
+     */
+    private static final String PARAMETER_INPUT_LENGTH = "inputLength";
+
     /** WEATHER_LOOKUP 의 지명. NLU 가 채운다. */
     private static final String PARAMETER_LOCATION = "location";
 
@@ -352,7 +361,7 @@ public class TaskService {
         }
 
         Map<String, Object> parameters = new LinkedHashMap<>();
-        parameters.put("inputLength", request.inputLength());
+        parameters.put(PARAMETER_INPUT_LENGTH, request.inputLength());
         parameters.put("modelId", request.modelId());
         parameters.put("promptVersion", request.promptVersion());
 
@@ -630,7 +639,7 @@ public class TaskService {
 
         Map<String, Object> kept = new LinkedHashMap<>(parameters);
         kept.remove(PARAMETER_TEXT);
-        kept.put("inputLength", rawText.length());
+        kept.put(PARAMETER_INPUT_LENGTH, rawText.length());
 
         return new RawTextDisposal(
                 "[서버에서 요약 · 원문 " + rawText.length() + "자, 요약 후 저장하지 않음]",
@@ -1231,6 +1240,26 @@ public class TaskService {
     public TasksRecord findOwned(AuthenticatedUser user, UUID taskId) {
         return taskRepository.findByPublicIdAndUserId(taskId, user.id())
                 .orElseThrow(() -> new SlashException(ErrorCode.RESOURCE_NOT_FOUND));
+    }
+
+    /**
+     * {@code inputText} 가 사용자가 넣은 원문 그대로인지. (#84 · slash-web#67)
+     *
+     * <p>요약이 끝나면 원문을 갖고 있지 않으므로(#83 · slash-docs#3) 그 자리에는 안내 문구가
+     * 들어간다. 문구는 <b>실행 위치마다 다르고</b> 앞으로 더 늘 수 있어서, 화면이 문구를
+     * 알아보게 두면 문구가 바뀔 때 조용히 깨진다. 재생성처럼 원문을 다시 보내는 동작은
+     * 이 값으로 판단하게 한다.
+     *
+     * <p>판단은 {@link #PARAMETER_INPUT_LENGTH} 로 한다. 원문을 걷어낼 때만 넣는 값이라
+     * 세 자리가 같은 표식을 공유한다 — 접수 시점부터 원문이 없는 {@code BROWSER},
+     * 요약 직후의 {@link #summaryRawTextDisposal}, 배포 롤링 창에 남은 것을 뒤늦게 거두는
+     * {@link TaskRepository#dropRawTextFromSucceededSummaries}.
+     *
+     * <p>원문이 아직 있는 동안(분석 중·실패)에는 {@code true} 다. 요약이 실패했으면 원문이
+     * 그대로 남아 있어 다시 보낼 수 있다.
+     */
+    public boolean inputTextIsOriginal(TasksRecord task) {
+        return !readParameters(task).containsKey(PARAMETER_INPUT_LENGTH);
     }
 
     // ------------------------------------------------------------------

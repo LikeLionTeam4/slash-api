@@ -18,6 +18,10 @@ import java.util.UUID;
  * (#58 · slash-docs#3)
  *
  * @param executionTarget 실제로 실행한 주체. V013 이전에 접수된 작업은 비어 있다
+ * @param inputTextIsOriginal {@code inputText} 가 사용자가 넣은 원문 그대로인지. 요약이 끝난
+ *                            작업은 원문 대신 안내 문구가 들어 있어 {@code false} 다 —
+ *                            재생성처럼 원문을 다시 보내는 동작은 그때 할 수 없다. 화면이
+ *                            문구를 알아보지 않아도 되도록 두는 값이다 (#84 · slash-web#67)
  * @param approval 실행 전 확인이 걸린 작업에만 있다. 화면은 이 값의 {@code version} 을
  *                 {@code If-Match} 로 되돌려 준다
  * @param question 되물어야 할 때 보여줄 말. {@code NEEDS_CLARIFICATION} 이 아니면 비어 있다.
@@ -31,6 +35,7 @@ public record TaskDetailResponse(
         String executionTarget,
         UUID deviceId,
         String inputText,
+        boolean inputTextIsOriginal,
         JsonNode parameters,
         JsonNode result,
         String errorCode,
