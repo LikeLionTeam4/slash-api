@@ -46,6 +46,43 @@ class PlaceNameTest {
     }
 
     @Test
+    @DisplayName("도 이름이 앞에 붙으면 그것을 떼고 물어본다")
+    void 도_이름을_떼어낸다() {
+        // 지오코딩은 "경기도 광주"·"경기도 광주시" 를 찾지 못하고, "광주시" 라야
+        // 경기도 광주시(37.41,127.26)가 나온다. (실측)
+        assertThat(PlaceName.candidatesOf("경기도 광주")).containsExactly("광주시", "광주");
+        assertThat(PlaceName.candidatesOf("경상북도 안동")).containsExactly("안동시", "안동");
+
+        // 이미 행정 단위가 붙어 있으면 그것만 쓴다.
+        assertThat(PlaceName.candidatesOf("경기도 광주시")).containsExactly("광주시");
+    }
+
+    @Test
+    @DisplayName("도 이름을 뗀 뒤에는 광역 표를 다시 보지 않는다")
+    void 도를_뗀_뒤에는_광역으로_바꾸지_않는다() {
+        // 여기가 이 규칙의 요점이다. "광주" 를 광역 표로 보내면 광주광역시가 되어
+        // 도 이름을 붙여 말한 사용자의 뜻과 정반대가 된다.
+        assertThat(PlaceName.candidatesOf("경기도 광주")).doesNotContain("광주광역시");
+
+        // 도 이름 없이 "광주" 만 말하면 그때는 광주광역시가 맞다.
+        assertThat(PlaceName.candidatesOf("광주")).containsExactly("광주광역시");
+    }
+
+    @Test
+    @DisplayName("제주도라고 말해도 찾는다")
+    void 제주도를_제주시로_바꾼다() {
+        // "제주도" 는 지오코딩에 없다. (실측)
+        assertThat(PlaceName.candidatesOf("제주도")).containsExactly("제주시");
+    }
+
+    @Test
+    @DisplayName("도 이름이 아닌 두 낱말은 그대로 둔다")
+    void 도가_아닌_두_낱말은_건드리지_않는다() {
+        // "서울 강남구" 처럼 광역시 + 자치구는 붙여서 물어봐야 한다.
+        assertThat(PlaceName.candidatesOf("서울 강남구")).containsExactly("서울 강남구");
+    }
+
+    @Test
     @DisplayName("앞뒤 공백은 떼고 물어본다")
     void 공백을_떼어낸다() {
         assertThat(PlaceName.candidatesOf("  서울 ")).containsExactly("서울특별시");

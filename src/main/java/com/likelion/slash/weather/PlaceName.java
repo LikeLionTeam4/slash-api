@@ -2,6 +2,7 @@ package com.likelion.slash.weather;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 사람이 말하는 지명을 Open-Meteo 가 찾을 수 있는 이름으로 바꾼다.
@@ -38,6 +39,8 @@ final class PlaceName {
             Map.entry("울산", "울산광역시"),
             Map.entry("세종", "세종특별자치시"),
             Map.entry("제주", "제주시"),
+            // "제주도" 도 사람들이 그대로 쓴다. 지오코딩은 이 이름을 찾지 못한다(실측).
+            Map.entry("제주도", "제주시"),
             Map.entry("경기", "경기도"),
             Map.entry("강원", "강원특별자치도"),
             Map.entry("충북", "충청북도"),
@@ -46,6 +49,22 @@ final class PlaceName {
             Map.entry("전남", "전라남도"),
             Map.entry("경북", "경상북도"),
             Map.entry("경남", "경상남도"));
+
+    /**
+     * 앞에 붙는 도 이름.
+     *
+     * <p>NLU 는 대부분 도 이름을 떼고 시·군만 넘기지만, <b>같은 이름이 두 곳에 있으면 떼지
+     * 못한다</b> — "경기도 광주"(경기도 광주시)와 "광주"(광주광역시)를 가르는 것이 그 값의
+     * 유일한 근거이기 때문이다. (slash-nlu#22 · #85 에서 정한 경계 — NLU 는 의미를,
+     * 여기서는 조회용 이름을 맡는다)
+     */
+    private static final Set<String> PROVINCES = Set.of(
+            "경기", "경기도",
+            "강원", "강원도", "강원특별자치도",
+            "충북", "충청북도", "충남", "충청남도", "충청도",
+            "전북", "전라북도", "전북특별자치도", "전남", "전라남도", "전라도",
+            "경북", "경상북도", "경남", "경상남도", "경상도",
+            "제주", "제주특별자치도");
 
     private PlaceName() {
     }
@@ -79,10 +98,33 @@ final class PlaceName {
             return List.of(wideArea);
         }
 
-        if (trimmed.endsWith("시") || trimmed.endsWith("군") || trimmed.endsWith("구")) {
-            return List.of(trimmed);
+        // 도 이름이 앞에 붙었으면 그것을 떼고 뒤만 남긴다. 지오코딩은 그 조합을 못 찾는다.
+        //
+        //   경기도 광주    → 광주시 37.41,127.26 (경기도 광주시)  ← 맞음
+        //   경기도 광주    그대로 → 없음
+        //   경기도 광주시  그대로 → 없음
+        //
+        // 뗀 뒤에 WIDE_AREAS 를 다시 보지 않는 것이 요점이다 — "경기도 광주" 의 "광주" 를
+        // 그 표로 보내면 광주광역시가 되어, 도 이름을 붙여 말한 사용자의 뜻과 정반대가
+        // 된다. 도 이름이 앞에 있다는 것 자체가 "그 광역시가 아니다" 라는 신호다.
+        String[] words = trimmed.split("\\s+");
+        if (words.length == 2 && PROVINCES.contains(words[0])) {
+            return suffixed(words[1]);
         }
 
-        return List.of(trimmed + "시", trimmed);
+        return suffixed(trimmed);
+    }
+
+    /**
+     * {@code 시} 를 붙인 쪽을 먼저, 원문을 뒤에 둔다.
+     *
+     * <p>{@code 시} 가 없는 곳도 있어서(봉화군 — {@code 봉화시} 는 없고 {@code 봉화} 로 걸린다)
+     * 원문을 폴백으로 남긴다.
+     */
+    private static List<String> suffixed(String name) {
+        if (name.endsWith("시") || name.endsWith("군") || name.endsWith("구")) {
+            return List.of(name);
+        }
+        return List.of(name + "시", name);
     }
 }
