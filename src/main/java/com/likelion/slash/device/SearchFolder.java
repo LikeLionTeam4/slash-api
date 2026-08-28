@@ -5,7 +5,8 @@ import java.util.Set;
 /**
  * Agent 가 READY 프레임의 {@code searchFolders} 로 보고한 검색 폴더 한 건. (WBS W1-03)
  *
- * <p>계약 원본은 slash-agent 의 {@code file_index.py} 에 있는 {@code list_search_folders()} 다.
+ * <p>계약 원본은 slash-runner 의 {@code slash-python-pc-runner/src/slash_pc_runner/file_index.py} 의
+ * {@code list_search_folders()} 다.
  * "READY.searchFolders 에 그대로 실어보낼" 목록이라고 적혀 있다.
  *
  * <pre>

@@ -69,7 +69,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
  *          ←  RESULT_ACK {persisted, taskStatus}            받아야 Agent 가 결과 캐시를 비운다
  * </pre>
  *
- * <p><b>계약은 slash-agent 저장소가 원본이다.</b> 2026-08-12 확인 기준으로 Python 으로 재작성돼
+ * <p><b>계약은 slash-runner 저장소가 원본이다.</b> 2026-08-12 확인 기준으로 Python 으로 재작성돼
  * {@code slash-python-agent/src/slash_agent/protocol.py}(봉투·상수·서명 대상)와
  * {@code agent.py} 의 {@code _build_ready()}(READY 구성)에 있다. 주고받는 JSON 예시는
  * {@code docs/MESSAGE_GUIDE.md} 다. 모든 메시지에 {@code schemaVersion}·{@code eventId}·
@@ -449,7 +449,7 @@ public class AgentWebSocketHandler extends TextWebSocketHandler {
     /**
      * READY 의 {@code searchFolders} 를 읽는다.
      *
-     * <p>계약은 slash-agent 의 {@code file_index.py} 가 원본이다. <b>실제 경로는 오지 않는다</b> —
+     * <p>계약은 slash-runner 의 {@code slash-python-pc-runner/src/slash_pc_runner/file_index.py} 가 원본이다. <b>실제 경로는 오지 않는다</b> —
      * Agent 가 자기만 들고 있고 서버에는 식별자·표시 이름·색인 상태만 보낸다.
      *
      * <p>모양이 어긋난 항목은 {@link SearchFolder#isStorable()} 이 저장 단계에서 거른다.

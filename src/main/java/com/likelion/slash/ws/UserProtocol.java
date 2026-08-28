@@ -3,7 +3,8 @@ package com.likelion.slash.ws;
 /**
  * 사용자 WSS {@code /ws/user} 메시지 계약의 고정값. (WBS W1-06)
  *
- * <p>계약 원본은 slash-agent 저장소의 {@code contracts/src/userMessages.ts} 이고,
+ * <p>계약 원본은 slash-runner 의 {@code slash-python-pc-runner/src/slash_pc_runner/protocol.py} 이고,
+ * (과거 {@code contracts/src/userMessages.ts} — Python 재작성으로 소멸)
  * 참조 구현은 {@code mock-api/src/userWss.ts} 다.
  *
  * <p><b>Agent 채널과 다르다.</b> Agent 메시지는 {@code schemaVersion}·{@code eventId}·
