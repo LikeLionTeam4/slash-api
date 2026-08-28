@@ -14,7 +14,8 @@ import java.util.UUID;
  * <p>이 프레임을 만드는 곳을 여기 하나로 모은다. 최초 전달(W1-04)과 스윕 재전송이 서로 다른
  * 모양을 보내면 Agent 는 같은 {@code dispatchId} 의 두 번째 프레임을 다른 작업으로 오해한다.
  *
- * <p>계약 원본은 slash-agent 의 {@code contracts/src/agentMessages.ts} 다.
+ * <p>계약 원본은 slash-runner 의 {@code slash-python-pc-runner/src/slash_pc_runner/protocol.py} 다.
+ * (과거 {@code contracts/src/agentMessages.ts} — Python 재작성으로 소멸)
  * 공통 필드가 하나라도 빠지면 Agent 의 zod 검증에서 통째로 거부된다.
  *
  * @param eventId       메시지마다 새로 만든다. 재전송이면 새 값이다.

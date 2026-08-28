@@ -212,7 +212,8 @@ public enum ErrorCode {
      * Agent 가 보고한 사유 코드를 우리 코드로 옮긴다. ({@code ACK.reasonCode} · {@code RESULT.error.code})
      *
      * <p>계약의 {@code REASON_CODES} 여덟 개는 이름이 그대로 겹치므로 그대로 받는다.
-     * (원본은 slash-agent 의 {@code contracts/src/enums.ts})
+     * (원본은 slash-runner 의 {@code slash-python-pc-runner/src/slash_pc_runner/protocol.py} —
+     * 과거 {@code contracts/src/enums.ts}, Python 재작성으로 소멸)
      *
      * <p><b>목록 밖의 값은 받지 않는다.</b> 이름만 맞으면 무엇이든 통과시키면 Agent 가
      * {@code AUTH_REQUIRED} 같은 값을 보내 작업을 엉뚱한 사유로 마감시킬 수 있다.

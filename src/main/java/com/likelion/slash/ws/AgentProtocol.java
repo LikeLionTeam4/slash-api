@@ -5,9 +5,12 @@ import java.util.UUID;
 /**
  * Agent WSS 메시지 계약의 고정값. (메시지 스펙 §3 · 3.4.2 · WBS W1-06)
  *
- * <p>계약 원본은 slash-agent 저장소의 {@code contracts/src/agentMessages.ts} 에 zod 스키마로 있고,
- * 서버 쪽 참조 구현은 {@code slash-api/mock-api/src/agentWss.ts} 다.
+ * <p>계약 원본은 slash-runner 의 {@code slash-python-pc-runner/src/slash_pc_runner/protocol.py} 다.
  * 값을 바꿀 일이 생기면 그쪽과 함께 고쳐야 한다. 여기에만 고치면 조용히 어긋난다.
+ *
+ * <p>과거에는 원본이 {@code contracts/src/agentMessages.ts}(zod 스키마)였고 참조 구현이
+ * {@code slash-api/mock-api/src/agentWss.ts} 였다. 실행기가 Electron/TypeScript 에서
+ * Python 으로 재작성되면서 둘 다 사라졌다 — 지금 그 경로를 찾으면 없다.
  *
  * <p><b>공통 필드</b> — 모든 메시지는 {@code schemaVersion}·{@code eventId}·{@code sentAt} 을
  * 반드시 포함한다. Agent 는 zod 로 검증하므로 하나라도 빠지면 메시지 전체가 거부된다.

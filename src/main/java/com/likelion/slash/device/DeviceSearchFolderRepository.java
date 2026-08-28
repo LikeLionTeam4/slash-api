@@ -77,7 +77,7 @@ public class DeviceSearchFolderRepository {
     /**
      * 이 기기에서 지금 검색할 수 있는 폴더 하나를 고른다.
      *
-     * <p><b>거르는 기준은 Agent 와 같아야 한다.</b> slash-agent 의 {@code file_index.py}
+     * <p><b>거르는 기준은 실행기와 같아야 한다.</b> slash-runner 의 {@code slash-python-pc-runner/src/slash_pc_runner/file_index.py}
      * {@code is_searchable()} 은 {@code UNAVAILABLE} 만 거르고 {@code INDEXING} 은 검색해 준다.
      * 서버가 여기서 더 좁히면 Agent 가 처리할 수 있는 요청을 우리가 막는 꼴이 된다.
      *

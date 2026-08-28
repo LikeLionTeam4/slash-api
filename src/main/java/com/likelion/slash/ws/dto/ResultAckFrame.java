@@ -13,7 +13,8 @@ import java.util.UUID;
  * 결과를 다시 보낸다. 중복 반영은 {@code AgentWebSocketHandler} 가 막지만, 그건 데이터가
  * 안전하다는 뜻일 뿐 오가는 프레임이 계속 쌓이는 것은 그대로다.
  *
- * <p>계약 원본은 slash-agent 의 {@code contracts/src/agentMessages.ts}
+ * <p>계약 원본은 slash-runner 의 {@code slash-python-pc-runner/src/slash_pc_runner/protocol.py}
+ * (과거 {@code contracts/src/agentMessages.ts} — Python 재작성으로 소멸)
  * ({@code resultAckMessageSchema}) 이고, 참조 구현은 {@code mock-api/src/taskOrchestrator.ts}
  * 의 {@code onAgentResult} 다. 세 필드({@code taskId}·{@code dispatchId}·{@code correlationId})는
  * 계약의 {@code taskFields} 로 묶여 있어 하나라도 빠지면 Agent 의 zod 검증에서 프레임 전체가
