@@ -28,12 +28,12 @@ class TaskTypeTest {
     @Test
     @DisplayName("처리 경로가 계약과 일치한다")
     void 처리_경로가_계약과_일치한다() {
-        assertThat(TaskType.WEATHER_LOOKUP.processingRoute()).isEqualTo(ProcessingRoute.BACKEND_SERVICE);
-        assertThat(TaskType.FILE_SEARCH.processingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT);
-        assertThat(TaskType.SYSTEM_STATUS.processingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT);
-        assertThat(TaskType.TEXT_SUMMARY.processingRoute()).isEqualTo(ProcessingRoute.LLM_SERVICE);
-        assertThat(TaskType.CODE_ANALYSIS.processingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT);
-        assertThat(TaskType.AI_AGENT_USAGE.processingRoute()).isEqualTo(ProcessingRoute.LOCAL_AGENT);
+        assertThat(TaskType.WEATHER_LOOKUP.defaultExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND);
+        assertThat(TaskType.FILE_SEARCH.defaultExecutionTarget()).isEqualTo(ExecutionTarget.RUNNER);
+        assertThat(TaskType.SYSTEM_STATUS.defaultExecutionTarget()).isEqualTo(ExecutionTarget.RUNNER);
+        assertThat(TaskType.TEXT_SUMMARY.defaultExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND);
+        assertThat(TaskType.CODE_ANALYSIS.defaultExecutionTarget()).isEqualTo(ExecutionTarget.RUNNER);
+        assertThat(TaskType.AI_AGENT_USAGE.defaultExecutionTarget()).isEqualTo(ExecutionTarget.RUNNER);
     }
 
     @Test

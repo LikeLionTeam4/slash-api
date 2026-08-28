@@ -532,10 +532,7 @@ public class TaskService {
                 return ExecutionTarget.RUNNER;
             }
         }
-        return switch (taskType.processingRoute()) {
-            case LOCAL_AGENT -> ExecutionTarget.RUNNER;
-            case BACKEND_SERVICE, LLM_SERVICE -> ExecutionTarget.BACKEND;
-        };
+        return taskType.defaultExecutionTarget();
     }
 
     /**

@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.ExecutionTarget;
-import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.enums.TaskType;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
@@ -62,7 +61,8 @@ class SummaryRawTextSweeperTest {
                 .set(TASKS.INPUT_TEXT, "/요약 " + 원문)
                 .set(TASKS.REQUEST_SUMMARY, 원문.substring(0, 20))
                 .set(TASKS.TASK_TYPE, TaskType.TEXT_SUMMARY.name())
-                .set(TASKS.PROCESSING_ROUTE, ProcessingRoute.LLM_SERVICE.name())
+                // 옛 행에는 이 값이 채워져 있었다. 지금은 쓰지 않지만 그때 모양 그대로 만든다.
+                .set(TASKS.PROCESSING_ROUTE, "LLM_SERVICE")
                 .set(TASKS.EXECUTION_TARGET, ExecutionTarget.BACKEND.name())
                 .set(TASKS.STATUS, status.name())
                 .set(TASKS.PARAMETERS, parameters)

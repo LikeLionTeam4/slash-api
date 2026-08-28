@@ -12,7 +12,8 @@ import java.util.List;
  *
  * @param taskType                  작업 유형 이름. {@code tasks.task_type} 에 그대로 저장된다
  * @param slashCommand              화면에서 입력하는 슬래시 명령 (예: {@code /file})
- * @param processingRoute           서버가 정한 처리 위치. NLU·LLM 이 정하지 않는다
+ * @param defaultExecutionTarget    다른 근거가 없을 때의 실행 위치. 사용자가 PC 를 고르거나
+ *                                  브라우저가 스스로 처리하면 실제 실행 위치는 달라진다
  * @param priority                  P0 는 이번 MVP 범위, P1 은 이후 범위
  * @param requiresDevice            실행 대상 PC 선택이 필요한지 여부
  * @param requiredParameters        실행에 필요한 입력값 전체
@@ -22,7 +23,7 @@ import java.util.List;
 public record TaskTypeResponse(
         String taskType,
         String slashCommand,
-        String processingRoute,
+        String defaultExecutionTarget,
         String priority,
         boolean requiresDevice,
         List<String> requiredParameters,
@@ -33,7 +34,7 @@ public record TaskTypeResponse(
         return new TaskTypeResponse(
                 taskType.name(),
                 taskType.slashCommand(),
-                taskType.processingRoute().name(),
+                taskType.defaultExecutionTarget().name(),
                 taskType.priority().name(),
                 taskType.requiresDevice(),
                 taskType.requiredParameters(),

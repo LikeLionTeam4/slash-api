@@ -11,7 +11,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.likelion.slash.auth.AuthenticatedUser;
 import com.likelion.slash.common.SlashTime;
 import com.likelion.slash.common.enums.ExecutionTarget;
-import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskStatus;
 import com.likelion.slash.common.error.ErrorCode;
 import com.likelion.slash.jooq.tables.records.TasksRecord;
@@ -111,7 +110,6 @@ class ExtractiveSummaryRoutingTest {
         assertThat(작업.getExecutionTarget()).isEqualTo(ExecutionTarget.BACKEND.name());
 
         // 처리 경로는 유형에서 파생된 상수라 엔진과 무관하게 그대로다.
-        assertThat(작업.getProcessingRoute()).isEqualTo(ProcessingRoute.LLM_SERVICE.name());
 
         // PC 를 붙들지 않는다.
         assertThat(작업.getDeviceId()).isNull();

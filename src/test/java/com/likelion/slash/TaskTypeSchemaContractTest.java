@@ -5,7 +5,6 @@ import static com.likelion.slash.jooq.Tables.TASKS;
 import static com.likelion.slash.jooq.Tables.USERS;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.likelion.slash.common.enums.ProcessingRoute;
 import com.likelion.slash.common.enums.TaskType;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -70,13 +69,6 @@ class TaskTypeSchemaContractTest {
                 .containsExactlyInAnyOrderElementsOf(이름_목록(TaskType.values()));
     }
 
-    @Test
-    @DisplayName("ProcessingRoute 와 tasks.processing_route 허용 목록이 같다")
-    void 처리_경로가_db_허용_목록과_같다() {
-        assertThat(제약이_허용하는_값("ck_tasks_processing_route"))
-                .containsExactlyInAnyOrderElementsOf(이름_목록(ProcessingRoute.values()));
-    }
-
     /**
      * {@code AGENT_CAPABILITIES} 와 {@code ck_device_capabilities_task_type} 대조. (#9)
      *
@@ -132,7 +124,6 @@ class TaskTypeSchemaContractTest {
                     .set(TASKS.DEVICE_ID, deviceId)
                     .set(TASKS.INPUT_TEXT, "계약 확인")
                     .set(TASKS.TASK_TYPE, taskType.name())
-                    .set(TASKS.PROCESSING_ROUTE, taskType.processingRoute().name())
                     .execute();
 
             assertThat(inserted)
