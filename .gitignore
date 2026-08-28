@@ -20,3 +20,6 @@ gradle.properties
 
 # 로그
 *.log
+
+# 로컬 도구 의존성 — 저장소에 넣지 않는다
+node_modules/
