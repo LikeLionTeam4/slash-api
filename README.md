@@ -84,19 +84,6 @@ IDE 에서 실행한다면 `.env` 가 아니라 실행 구성의 환경 변수�
 2. `./gradlew generateJooq` 로 적용·재생성한다.
 3. 생성 코드(`src/generated`)와 쿼리 시험을 **함께** 커밋한다.
 
-### 디렉터리 구조
-
-```
-src/
-├── main/
-│   ├── java/com/likelion/slash/     # 애플리케이션 코드
-│   └── resources/
-│       ├── application.yml
-│       └── db/migration/            # Flyway 마이그레이션
-├── generated/jooq/                  # jOOQ 생성 코드 (커밋 대상, 직접 수정 금지)
-└── test/java/com/likelion/slash/
-```
-
 ### 프로필
 
 | 프로필 | 용도 | DB |
@@ -154,6 +141,33 @@ External Secrets 가 동기화한다). 나머지는 평문 env 다. RDS·Valkey 
 - 내부 PK 는 `bigint`, 외부 노출 식별자는 `uuid public_id` 를 사용한다.
 - 상태값은 PostgreSQL Enum 대신 `varchar` + `CHECK` 로 관리한다.
 - `DSLContext` 는 Repository 계층 안에서만 사용하고, 생성된 jOOQ Record 를 서비스 밖으로 내보내지 않는다.
+
+## 구조
+
+```
+src/
+├── main/
+│   ├── java/com/likelion/slash/     # 애플리케이션 코드
+│   └── resources/
+│       ├── application.yml
+│       └── db/migration/            # Flyway 마이그레이션
+├── generated/jooq/                  # jOOQ 생성 코드 (커밋 대상, 직접 수정 금지)
+└── test/java/com/likelion/slash/
+```
+
+패키지는 도메인 단위로 나눈다. 각 패키지의 담당 범위는 `package-info.java`에 적혀 있다.
+
+| 패키지 | 담당 |
+|---|---|
+| `auth` | Cognito JWT 검증, 사용자 매핑 |
+| `pairing` | PC 등록 코드 발급·서명 검증 |
+| `device` | 등록 PC 관리, 소유권 강제, 실행 가능 여부 판정 |
+| `task` | 작업 원장, 상태 전이, 처리 경로·실행 위치 결정 |
+| `dispatch` | PC 전달 이력, 만료 처리 |
+| `ws` | Agent·사용자 WebSocket 게이트웨이 |
+| `approval` | 실행 전 사용자 확인 정책 |
+| `nlu` `llm` `weather` | 외부·내부 서비스 연동 |
+| `audit` `job` `health` `common` `config` | 감사, 배치, 상태 점검, 공통 |
 
 ## 문서
 
