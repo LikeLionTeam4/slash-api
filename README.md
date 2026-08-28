@@ -84,19 +84,6 @@ IDE 에서 실행한다면 `.env` 가 아니라 실행 구성의 환경 변수�
 2. `./gradlew generateJooq` 로 적용·재생성한다.
 3. 생성 코드(`src/generated`)와 쿼리 시험을 **함께** 커밋한다.
 
-### 디렉터리 구조
-
-```
-src/
-├── main/
-│   ├── java/com/likelion/slash/     # 애플리케이션 코드
-│   └── resources/
-│       ├── application.yml
-│       └── db/migration/            # Flyway 마이그레이션
-├── generated/jooq/                  # jOOQ 생성 코드 (커밋 대상, 직접 수정 금지)
-└── test/java/com/likelion/slash/
-```
-
 ### 프로필
 
 | 프로필 | 용도 | DB |
@@ -155,6 +142,33 @@ External Secrets 가 동기화한다). 나머지는 평문 env 다. RDS·Valkey 
 - 상태값은 PostgreSQL Enum 대신 `varchar` + `CHECK` 로 관리한다.
 - `DSLContext` 는 Repository 계층 안에서만 사용하고, 생성된 jOOQ Record 를 서비스 밖으로 내보내지 않는다.
 
+## 구조
+
+```
+src/
+├── main/
+│   ├── java/com/likelion/slash/     # 애플리케이션 코드
+│   └── resources/
+│       ├── application.yml
+│       └── db/migration/            # Flyway 마이그레이션
+├── generated/jooq/                  # jOOQ 생성 코드 (커밋 대상, 직접 수정 금지)
+└── test/java/com/likelion/slash/
+```
+
+패키지는 도메인 단위로 나눈다. 각 패키지의 담당 범위는 `package-info.java`에 적혀 있다.
+
+| 패키지 | 담당 |
+|---|---|
+| `auth` | Cognito JWT 검증, 사용자 매핑 |
+| `pairing` | PC 등록 코드 발급·서명 검증 |
+| `device` | 등록 PC 관리, 소유권 강제, 실행 가능 여부 판정 |
+| `task` | 작업 원장, 상태 전이, 처리 경로·실행 위치 결정 |
+| `dispatch` | PC 전달 이력, 만료 처리 |
+| `ws` | Agent·사용자 WebSocket 게이트웨이 |
+| `approval` | 실행 전 사용자 확인 정책 |
+| `nlu` `llm` `weather` | 외부·내부 서비스 연동 |
+| `audit` `job` `health` `common` `config` | 감사, 배치, 상태 점검, 공통 |
+
 ## 문서
 
 | 문서 | 대상 | 내용 |
@@ -169,9 +183,9 @@ External Secrets 가 동기화한다). 나머지는 평문 env 다. RDS·Valkey 
 | 저장소 | 역할 |
 |---|---|
 | [slash-web](https://github.com/LikeLionTeam4/slash-web) | 웹 클라이언트 — React·Vite UI, S3/CloudFront 배포 |
-| **slash-api** (현재) | 코어 API — 인증, 작업 관리, 실행 위치 결정, DB 연동 |
-| [slash-nlu](https://github.com/LikeLionTeam4/slash-nlu) | 자연어 분석 — slash 명령 파싱, 규칙·Kiwi 의도 분류, 인자 추출 |
-| [slash-llm](https://github.com/LikeLionTeam4/slash-llm) | LLM 서비스 — Gemma 추론. **2026-08-25 배포를 정리해 지금은 쓰지 않는다**(요약이 CPU 추출·브라우저 WebLLM 으로 갈리면서 GPU 경로를 유지할 이유가 없어졌다). 코드는 남아 있어 되돌릴 수 있다 |
-| [slash-runner](https://github.com/LikeLionTeam4/slash-runner) | PC 작업 실행기 — PC 파일 검색, 상태 조회, 로컬 AI 실행·결과 전달 |
+| **slash-api** (현재) | 코어 API — 인증, 작업 원장, 실행 위치 결정, WSS 게이트웨이 |
+| [slash-nlu](https://github.com/LikeLionTeam4/slash-nlu) | 자연어 분석 — slash 명령 파싱, 규칙·Kiwi 의도 분류, 인자 추출, CPU 추출 요약 |
+| [slash-llm](https://github.com/LikeLionTeam4/slash-llm) | LLM 서비스 — Gemma 추론. 2026-08-25 dev 배포 제거, 기능 동결 |
+| [slash-runner](https://github.com/LikeLionTeam4/slash-runner) | PC 작업 실행기 — 파일 검색·위치 열기·상태 조회·로컬 CLI 실행. Python·PyInstaller |
 | [slash-infra](https://github.com/LikeLionTeam4/slash-infra) | 인프라 — Terraform(AWS), Helm·ArgoCD 배포 |
 | [slash-docs](https://github.com/LikeLionTeam4/slash-docs) | 프로젝트 문서 — 아키텍처, API 계약, ERD, 회의록 |
